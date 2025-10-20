@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'weather_screen.dart';
+import 'expense_tab.dart'; // 👈 1. Import the new ExpenseTab
 
 void main() {
   runApp(MyApp());
@@ -20,6 +21,7 @@ class HomeScreen extends StatefulWidget {
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
+
 class _HomeScreenState extends State<HomeScreen> {
   List<String> routeStops = []; // shared with Weather tab
 
@@ -59,7 +61,7 @@ class _HomeScreenState extends State<HomeScreen> {
             tabs: [
               Tab(text: "Plan"),
               Tab(text: "Weather"),
-              Tab(text: "Expense"),
+              Tab(text: "Expenses"), // Renamed "Expense" to "Expenses" for clarity
             ],
           ),
         ),
@@ -73,13 +75,14 @@ class _HomeScreenState extends State<HomeScreen> {
               },
             ),
             WeatherScreen(routeStops: routeStops),
-            const Center(child: Text("Expense tab coming soon")),
+            const ExpenseTab(), // 👈 2. Replaced placeholder with ExpenseTab
           ],
         ),
       ),
     );
   }
 }
+
 class PlanTab extends StatefulWidget {
   final Function(List<String>) onRouteUpdate; // callback to send routeStops to HomeScreen
   const PlanTab({Key? key, required this.onRouteUpdate}) : super(key: key);
@@ -181,6 +184,7 @@ class _PlanTabState extends State<PlanTab> {
       const SnackBar(content: Text('Smart plan generated!')),
     );
   }
+  
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
