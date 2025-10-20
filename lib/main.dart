@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'weather_screen.dart';
 
 void main() {
   runApp(MyApp());
@@ -15,7 +16,13 @@ class MyApp extends StatelessWidget {
   }
 }
 
-class HomeScreen extends StatelessWidget {
+class HomeScreen extends StatefulWidget {
+  @override
+  State<HomeScreen> createState() => _HomeScreenState();
+}
+class _HomeScreenState extends State<HomeScreen> {
+  List<String> routeStops = []; // shared with Weather tab
+
   @override
   Widget build(BuildContext context) {
     return DefaultTabController(
@@ -39,7 +46,6 @@ class HomeScreen extends StatelessWidget {
             IconButton(
               icon: const Icon(Icons.logout),
               onPressed: () {
-                // No Firebase sign out; you can add custom logic if needed
                 ScaffoldMessenger.of(context).showSnackBar(
                   const SnackBar(content: Text("Logout tapped")),
                 );
@@ -59,19 +65,24 @@ class HomeScreen extends StatelessWidget {
         ),
         body: TabBarView(
           children: [
-            const PlanTab(), // Only if PlanTab constructor is const. Yours is const, so fine.
-            Center(child: Text("Weather tab coming soon")),
-            Center(child: Text("Expense tab coming soon")),
+            PlanTab(
+              onRouteUpdate: (stops) {
+                setState(() {
+                  routeStops = stops;
+                });
+              },
+            ),
+            WeatherScreen(routeStops: routeStops),
+            const Center(child: Text("Expense tab coming soon")),
           ],
         ),
-
       ),
     );
   }
 }
-
 class PlanTab extends StatefulWidget {
-  const PlanTab({Key? key}) : super(key: key);
+  final Function(List<String>) onRouteUpdate; // callback to send routeStops to HomeScreen
+  const PlanTab({Key? key, required this.onRouteUpdate}) : super(key: key);
 
   @override
   State<PlanTab> createState() => _PlanTabState();
@@ -105,7 +116,6 @@ class _PlanTabState extends State<PlanTab> {
   List<String> routeStops = [];
 
   final ScrollController _scrollController = ScrollController();
-
   @override
   void dispose() {
     _scrollController.dispose();
@@ -153,8 +163,12 @@ class _PlanTabState extends State<PlanTab> {
           toController.text,
         ];
       }
+
+      // Send routeStops to HomeScreen for Weather tab
+      widget.onRouteUpdate(routeStops);
     });
 
+    // Scroll to bottom after generating plan
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _scrollController.animateTo(
         _scrollController.position.maxScrollExtent,
@@ -164,10 +178,9 @@ class _PlanTabState extends State<PlanTab> {
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Smart plan generation coming soon!')),
+      const SnackBar(content: Text('Smart plan generated!')),
     );
   }
-
   @override
   Widget build(BuildContext context) {
     return SingleChildScrollView(
