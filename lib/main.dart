@@ -136,6 +136,30 @@ class _PlanTabState extends State<PlanTab> {
         .showSnackBar(SnackBar(content: Text("Would open Google Maps for $query")));
   }
 
+  // ⭐ NEW: Method to reset the entire plan form
+  void _resetPlan() {
+    setState(() {
+      // 1. Clear text input fields
+      fromController.clear();
+      toController.clear();
+      budgetController.clear();
+      daysController.clear();
+      travellersController.clear();
+
+      // 2. Reset state variables
+      selectedVehicle = null;
+      _showPlan = false;
+      routeStops = [];
+      
+      // 3. Notify HomeScreen to clear weather stops
+      widget.onRouteUpdate([]);
+    });
+
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text('Plan reset. Start a new trip!')),
+    );
+  }
+
   // Generate travel plan logic
   void _generatePlan() {
     if (fromController.text.isEmpty || toController.text.isEmpty) {
@@ -173,11 +197,13 @@ class _PlanTabState extends State<PlanTab> {
 
     // Scroll to bottom after generating plan
     WidgetsBinding.instance.addPostFrameCallback((_) {
-      _scrollController.animateTo(
-        _scrollController.position.maxScrollExtent,
-        duration: const Duration(milliseconds: 500),
-        curve: Curves.easeInOut,
-      );
+      if (_scrollController.hasClients) {
+        _scrollController.animateTo(
+          _scrollController.position.maxScrollExtent,
+          duration: const Duration(milliseconds: 500),
+          curve: Curves.easeInOut,
+        );
+      }
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
@@ -198,7 +224,10 @@ class _PlanTabState extends State<PlanTab> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
+              // REMOVED: Header for Plan Tab (Icon and "Trip Planner" text)
+              // The SizedBox(height: 24) is kept to maintain initial spacing
               const SizedBox(height: 24),
+              // Input fields start here
               TextField(
                 controller: fromController,
                 decoration: InputDecoration(
@@ -368,7 +397,7 @@ class _PlanTabState extends State<PlanTab> {
                                     decoration: TextDecoration.underline),
                               ),
                             ),
-                          )),
+                          )).toList(),
                       const SizedBox(height: 24),
                       const Text("⛽ Fuel Stops:",
                           style: TextStyle(
@@ -385,7 +414,7 @@ class _PlanTabState extends State<PlanTab> {
                                     decoration: TextDecoration.underline),
                               ),
                             ),
-                          )),
+                          )).toList(),
                       const SizedBox(height: 24),
                       const Text("🛣️ Safe Route:",
                           style: TextStyle(
@@ -413,6 +442,36 @@ class _PlanTabState extends State<PlanTab> {
                       ),
                     ],
                   ),
+                ),
+            
+              // Clear Plan Button (Conditional)
+              if (_showPlan)
+                Column(
+                  children: [
+                    const SizedBox(height: 30),
+                    SizedBox(
+                      width: double.infinity,
+                      child: ElevatedButton(
+                        onPressed: _resetPlan,
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.teal.shade600,
+                          padding: const EdgeInsets.symmetric(vertical: 14),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
+                        ),
+                        child: const Text(
+                          "Clear Plan",
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
+                        ),
+                      ),
+                    ),
+                    const SizedBox(height: 10), // Add some padding at the bottom
+                  ],
                 ),
             ],
           ),

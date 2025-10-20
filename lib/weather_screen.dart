@@ -61,7 +61,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
     }
   }
 
-  // --- Real Weather Fetching Logic ---
+  // --- Real Weather Fetching Logic (unchanged) ---
 
   Future<void> fetchWeather(String city) async {
     if (!mounted) return;
@@ -136,7 +136,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
     }
   }
 
-  // --- UI Layout (Same as the last clean version) ---
+  // --- UI Layout (Updated) ---
 
   @override
   Widget build(BuildContext context) {
@@ -172,16 +172,20 @@ class _WeatherScreenState extends State<WeatherScreen> {
                 ),
                 const SizedBox(height: 20),
 
-                // Title for the list
-                const Text(
-                  "Route Stops Weather Forecast",
-                  style: TextStyle(
-                    fontSize: 18,
-                    fontWeight: FontWeight.bold,
-                    color: Colors.indigo,
+                // Title for the list (MODIFIED: Conditional display and centered)
+                if (routeStops.isNotEmpty) ...[
+                  Center(
+                    child: const Text(
+                      "Route Stops Weather Forecast",
+                      style: TextStyle(
+                        fontSize: 18,
+                        fontWeight: FontWeight.bold,
+                        color: Colors.indigo,
+                      ),
+                    ),
                   ),
-                ),
-                const Divider(color: Colors.indigoAccent),
+                  const Divider(color: Colors.indigoAccent),
+                ],
 
                 // List of weather cards
                 Column(

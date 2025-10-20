@@ -19,6 +19,18 @@ class _ExpenseTabState extends State<ExpenseTab> {
   final TextEditingController _amountController = TextEditingController();
   final TextEditingController _membersController = TextEditingController();
 
+  // Color Definitions and Save Function
+  final Color _peachColor = Colors.orange.shade300;
+  final Color _indigoColor = Colors.indigo.shade600;
+
+  void _saveExpenses() {
+    ScaffoldMessenger.of(context).showSnackBar(
+      const SnackBar(content: Text("Expenses saved (Placeholder action).")),
+    );
+  }
+  
+  // --- Logic Functions ---
+
   // State variables
   List<ExpenseItem> _expenses = []; 
   
@@ -39,8 +51,6 @@ class _ExpenseTabState extends State<ExpenseTab> {
     _membersController.dispose();
     super.dispose();
   }
-
-  // --- Logic Functions ---
 
   void _handleMemberInputChange() {
     final text = _membersController.text.trim();
@@ -242,7 +252,7 @@ class _ExpenseTabState extends State<ExpenseTab> {
                 child: ElevatedButton(
                   onPressed: _resetExpenses,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.red.shade600,
+                    backgroundColor: _peachColor, // Changed to Peach color,
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
                     padding: EdgeInsets.zero,
@@ -305,21 +315,45 @@ class _ExpenseTabState extends State<ExpenseTab> {
             ),
           ),
           const SizedBox(height: 20),
-          // Clear All Button 
+          // Two-Button Row (Clear and Save)
           SizedBox(
             width: double.infinity,
-            child: ElevatedButton(
-              onPressed: _resetExpenses,
-              style: ElevatedButton.styleFrom(
-                backgroundColor: Colors.red,
-                foregroundColor: Colors.white,
-                padding: const EdgeInsets.symmetric(vertical: 15),
-                shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-              ),
-              child: const Text(
-                "Clear All Expenses",
-                style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
-              ),
+            child: Row(
+              children: [
+                // Clear Button (Peach)
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _resetExpenses,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _peachColor, // Peach color
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text(
+                      "Clear",
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+                const SizedBox(width: 15), // Spacer
+                // Save Button (Indigo)
+                Expanded(
+                  child: ElevatedButton(
+                    onPressed: _saveExpenses, // Save function
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: _indigoColor, // Indigo color
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 15),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: const Text(
+                      "Save",
+                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                    ),
+                  ),
+                ),
+              ],
             ),
           ),
         ],
@@ -341,21 +375,8 @@ class _ExpenseTabState extends State<ExpenseTab> {
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
-                const Row(
-                  children: [
-                    Icon(Icons.group, color: Colors.indigo, size: 28),
-                    SizedBox(width: 8),
-                    Text(
-                      "Group Expense Splitter",
-                      style: TextStyle(
-                        fontSize: 20,
-                        fontWeight: FontWeight.bold,
-                        color: Colors.indigo,
-                      ),
-                    ),
-                  ],
-                ),
-                const Divider(color: Colors.indigoAccent, height: 25),
+                // The 'Row' and 'Divider' for the header have been removed.
+                
                 _buildInputSection(),
                 const SizedBox(height: 15),
                 
