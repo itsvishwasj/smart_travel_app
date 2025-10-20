@@ -1,4 +1,6 @@
 import 'package:flutter/material.dart';
+import 'package:http/http.dart' as http;
+import 'dart:convert';
 
 class WeatherScreen extends StatefulWidget {
   final List<String> routeStops;
@@ -11,6 +13,9 @@ class WeatherScreen extends StatefulWidget {
 class _WeatherScreenState extends State<WeatherScreen> {
   final ScrollController _scrollController = ScrollController();
   final TextEditingController manualCityController = TextEditingController();
+
+  // 1. API Key is now included
+  final String openWeatherApiKey = '06d0a20bef517ee7ebf3927738f276c0'; 
 
   List<String> routeStops = [];
   Map<String, Map<String, dynamic>> weatherData = {};
@@ -56,11 +61,12 @@ class _WeatherScreenState extends State<WeatherScreen> {
     }
   }
 
-  // --- Weather Fetching Logic ---
+  // --- Real Weather Fetching Logic ---
 
   Future<void> fetchWeather(String city) async {
     if (!mounted) return;
 
+    // Set initial loading state
     setState(() {
       weatherData[city] = {
         'temp': '0',
@@ -69,22 +75,57 @@ class _WeatherScreenState extends State<WeatherScreen> {
       };
     });
 
-    await Future.delayed(const Duration(milliseconds: 700));
+    // Construct the API URL using the city and API key
+    final url = Uri.parse(
+        'https://api.openweathermap.org/data/2.5/weather?q=$city&appid=$openWeatherApiKey&units=metric');
 
-    if (!mounted) return;
+    try {
+      final response = await http.get(url);
 
-    setState(() {
-      final conditions = ['Sunny', 'Cloudy', 'Rainy', 'Snow', 'Drizzle', 'Clear'];
-      weatherData[city] = {
-        'temp': (15 + city.length % 15).toString(),
-        'condition': conditions.elementAt(city.length % conditions.length),
-        'humidity': (50 + city.length % 30).toString(),
-      };
-    });
+      if (!mounted) return;
 
+      if (response.statusCode == 200) {
+        final data = json.decode(response.body);
+        
+        final temp = data['main']['temp'].round().toString();
+        // The condition is derived from the 'weather' array
+        final condition = data['weather'][0]['main']; 
+        final humidity = data['main']['humidity'].toString();
+
+        setState(() {
+          weatherData[city] = {
+            'temp': temp,
+            'condition': condition,
+            'humidity': humidity,
+          };
+        });
+      } else {
+        // Handle city not found (404) or other API errors
+        setState(() {
+          weatherData[city] = {
+            'temp': 'N/A',
+            'condition': 'City Not Found',
+            'humidity': 'N/A',
+          };
+        });
+      }
+    } catch (e) {
+      // Handle network errors (e.g., no internet connection)
+      if (!mounted) return;
+      setState(() {
+        weatherData[city] = {
+          'temp': '!',
+          'condition': 'Network Error',
+          'humidity': '!',
+        };
+      });
+    }
+
+    // Scroll to the newly added/updated city
     final index = routeStops.indexOf(city);
     if (index >= 0 && _scrollController.hasClients) {
       WidgetsBinding.instance.addPostFrameCallback((_) {
+        // Approximate card height is 160.0
         final targetPosition = index * 160.0;
         _scrollController.animateTo(
           targetPosition,
@@ -95,7 +136,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
     }
   }
 
-  // --- UI Layout ---
+  // --- UI Layout (Same as the last clean version) ---
 
   @override
   Widget build(BuildContext context) {
@@ -160,7 +201,6 @@ class _WeatherScreenState extends State<WeatherScreen> {
                           borderRadius: BorderRadius.circular(12),
                           border: Border.all(color: Colors.indigo.shade100),
                         ),
-                        // The main container is a Row to separate content and emoji
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
                           crossAxisAlignment: CrossAxisAlignment.center,
@@ -178,7 +218,6 @@ class _WeatherScreenState extends State<WeatherScreen> {
                                   const SizedBox(height: 6),
                                   if (isLoaded)
                                     Column(
-                                      // This ensures the details are left-aligned
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
                                         Text("Temp: ${data['temp']}°C", style: const TextStyle(fontSize: 15)),
