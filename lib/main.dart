@@ -1,29 +1,80 @@
 import 'package:flutter/material.dart';
 import 'weather_screen.dart';
-import 'expense_tab.dart'; // 👈 1. Import the new ExpenseTab
+import 'expense_tab.dart'; 
+import 'plans_history_screen.dart'; 
+import 'expenses_history_screen.dart'; 
 
 void main() {
-  runApp(MyApp());
+  runApp(const MyApp());
 }
 
 class MyApp extends StatelessWidget {
+  const MyApp({super.key});
+
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Smart Travel Assistant',
-      theme: ThemeData(primarySwatch: Colors.indigo),
-      home: HomeScreen(), // Directly open main app
+      theme: ThemeData(
+        primarySwatch: Colors.indigo,
+        useMaterial3: true,
+      ), 
+      home: const HomeScreen(),
     );
   }
 }
 
 class HomeScreen extends StatefulWidget {
+  const HomeScreen({super.key});
+
   @override
   State<HomeScreen> createState() => _HomeScreenState();
 }
 
 class _HomeScreenState extends State<HomeScreen> {
   List<String> routeStops = []; // shared with Weather tab
+
+  // --- Navigation Helpers ---
+  void _navigateToTab(int index, BuildContext context) {
+    Navigator.of(context).pop(); // Close the drawer
+    final TabController? controller = DefaultTabController.of(context);
+    if (controller != null) {
+      controller.animateTo(index);
+    }
+  }
+
+  void _navigateToPlansHistory() {
+    Navigator.of(context).pop(); // Close the drawer first
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const PlansHistoryScreen(),
+      ),
+    );
+  }
+
+  void _navigateToExpensesHistory() {
+    Navigator.of(context).pop(); // Close the drawer first
+    Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (context) => const ExpensesHistoryScreen(),
+      ),
+    );
+  }
+  
+  void _showAboutDialog() {
+    showAboutDialog(
+      context: context,
+      applicationName: 'Smart Travel Assistant',
+      applicationVersion: '1.0.0',
+      applicationIcon: const Icon(Icons.travel_explore, color: Colors.indigo),
+      children: const <Widget>[
+        Padding(
+          padding: EdgeInsets.only(top: 15),
+          child: Text('Your intelligent companion for trip planning, weather checks, and expense tracking.'),
+        ),
+      ],
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -44,15 +95,8 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           iconTheme: const IconThemeData(color: Colors.indigo),
-          actions: [
-            IconButton(
-              icon: const Icon(Icons.logout),
-              onPressed: () {
-                ScaffoldMessenger.of(context).showSnackBar(
-                  const SnackBar(content: Text("Logout tapped")),
-                );
-              },
-            ),
+          actions: const [
+            // LOGOUT BUTTON REMOVED FROM HERE
           ],
           bottom: const TabBar(
             labelColor: Colors.indigo,
@@ -61,10 +105,114 @@ class _HomeScreenState extends State<HomeScreen> {
             tabs: [
               Tab(text: "Plan"),
               Tab(text: "Weather"),
-              Tab(text: "Expenses"), // Renamed "Expense" to "Expenses" for clarity
+              Tab(text: "Expenses"),
             ],
           ),
         ),
+        
+        // --- INDIGO-THEMED DRAWER ---
+        drawer: Drawer(
+          backgroundColor: Colors.white, 
+          child: ListView(
+            padding: EdgeInsets.zero,
+            children: <Widget>[
+              // Drawer Header
+              const UserAccountsDrawerHeader(
+                accountName: Text(
+                  'Welcome, Traveler!',
+                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
+                ),
+                accountEmail: Text('user.name@example.com', style: TextStyle(color: Colors.white70)),
+                currentAccountPicture: CircleAvatar(
+                  backgroundColor: Colors.white,
+                  child: Icon(Icons.account_circle, size: 50, color: Colors.indigo),
+                ),
+                decoration: BoxDecoration(
+                  color: Colors.indigo, // Primary color theme
+                ),
+              ),
+              
+              // Navigation ListTiles (to tabs)
+              ListTile(
+                leading: const Icon(Icons.map, color: Colors.indigo),
+                title: const Text('Plan Trip', style: TextStyle(color: Colors.indigo)),
+                onTap: () => _navigateToTab(0, context),
+              ),
+              ListTile(
+                leading: const Icon(Icons.cloud, color: Colors.indigo),
+                title: const Text('Current Weather', style: TextStyle(color: Colors.indigo)),
+                onTap: () => _navigateToTab(1, context),
+              ),
+              ListTile(
+                leading: const Icon(Icons.monetization_on, color: Colors.indigo),
+                title: const Text('Track Expenses', style: TextStyle(color: Colors.indigo)),
+                onTap: () => _navigateToTab(2, context),
+              ),
+              const Divider(),
+              
+              // History Expansion Tile (COLOR CHANGED TO INDIGO)
+              ExpansionTile(
+                leading: const Icon(Icons.history, color: Colors.indigo), // CHANGED from teal to indigo
+                title: const Text('History', style: TextStyle(color: Colors.indigo)), // CHANGED from teal to indigo
+                children: <Widget>[
+                  ListTile(
+                    title: const Padding(
+                      padding: EdgeInsets.only(left: 30.0),
+                      child: Text('Past Plans'),
+                    ),
+                    leading: const Icon(Icons.list_alt, color: Colors.indigo),
+                    onTap: _navigateToPlansHistory,
+                  ),
+                  ListTile(
+                    title: const Padding(
+                      padding: EdgeInsets.only(left: 30.0),
+                      child: Text('Past Expenses'),
+                    ),
+                    leading: const Icon(Icons.receipt, color: Colors.indigo),
+                    onTap: _navigateToExpensesHistory,
+                  ),
+                ],
+              ),
+              const Divider(),
+
+              // Settings
+              ListTile(
+                leading: const Icon(Icons.settings, color: Colors.grey),
+                title: const Text('Settings'),
+                onTap: () {
+                  Navigator.of(context).pop();
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Settings page coming soon!")),
+                  );
+                },
+              ),
+              
+              // About App
+              ListTile(
+                leading: const Icon(Icons.info_outline, color: Colors.grey),
+                title: const Text('About App'),
+                onTap: () {
+                  Navigator.of(context).pop(); 
+                  _showAboutDialog();
+                },
+              ),
+
+              // NEW LOGOUT OPTION ADDED HERE (COLOR CHANGED TO INDIGO)
+              ListTile(
+                leading: const Icon(Icons.logout, color: Colors.indigo), // CHANGED from red to indigo
+                title: const Text('Logout', style: TextStyle(color: Colors.indigo)), // CHANGED from red to indigo
+                onTap: () {
+                  Navigator.of(context).pop(); // Close the drawer first
+                  ScaffoldMessenger.of(context).showSnackBar(
+                    const SnackBar(content: Text("Logout tapped")),
+                  );
+                },
+              ),
+            ],
+          ),
+        ),
+        // --- END OF DRAWER ---
+
         body: TabBarView(
           children: [
             PlanTab(
@@ -75,7 +223,7 @@ class _HomeScreenState extends State<HomeScreen> {
               },
             ),
             WeatherScreen(routeStops: routeStops),
-            const ExpenseTab(), // 👈 2. Replaced placeholder with ExpenseTab
+            const ExpenseTab(),
           ],
         ),
       ),
@@ -83,6 +231,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
+// PlanTab Implementation (from Code 2)
 class PlanTab extends StatefulWidget {
   final Function(List<String>) onRouteUpdate; // callback to send routeStops to HomeScreen
   const PlanTab({Key? key, required this.onRouteUpdate}) : super(key: key);
@@ -93,12 +242,12 @@ class PlanTab extends StatefulWidget {
 
 class _PlanTabState extends State<PlanTab> {
   // Sample data
-  final List<Map<String, String>> hotels = [
+  final List<Map<String, String>> hotels = const [
     {"name": "Budget Stay", "price": "₹1500"},
     {"name": "Comfort Inn", "price": "₹3000"},
   ];
 
-  final List<String> fuels = [
+  final List<String> fuels = const [
     "Shell Petrol Pump near midway point",
     "Indian Oil Station near highway exit",
     "HP Petrol Bunk before destination",
@@ -136,7 +285,7 @@ class _PlanTabState extends State<PlanTab> {
         .showSnackBar(SnackBar(content: Text("Would open Google Maps for $query")));
   }
 
-  // ⭐ NEW: Method to reset the entire plan form
+  // Method to reset the entire plan form
   void _resetPlan() {
     setState(() {
       // 1. Clear text input fields
@@ -174,7 +323,7 @@ class _PlanTabState extends State<PlanTab> {
 
       if (fromController.text.toLowerCase().contains("bengaluru") &&
           toController.text.toLowerCase().contains("goa")) {
-        routeStops = [
+        routeStops = const [
           "Bengaluru",
           "Tumkur",
           "Chitradurga",
@@ -210,6 +359,89 @@ class _PlanTabState extends State<PlanTab> {
       const SnackBar(content: Text('Smart plan generated!')),
     );
   }
+
+  // METHOD: Show the modal radio button selection dialog
+  void _showVehicleSelectionDialog(BuildContext context) {
+    String? tempSelected = selectedVehicle;
+    // Define vehicles with separate text and emoji for styling
+    final List<Map<String, String>> vehicles = const [
+      {'name': 'Bike', 'emoji': '🏍️'},
+      {'name': 'Car', 'emoji': '🚗'},
+      {'name': 'EV', 'emoji': '🔋'},
+    ];
+    
+    // Define the font size for the large emoji
+    const double emojiFontSize = 26.0;
+
+    showDialog<String>(
+      context: context,
+      builder: (BuildContext context) {
+        return StatefulBuilder(
+          builder: (context, setStateSB) {
+            return AlertDialog(
+              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+              title: const Text('Select Vehicle'),
+              contentPadding: const EdgeInsets.only(top: 12.0),
+              content: Column(
+                mainAxisSize: MainAxisSize.min,
+                children: vehicles.map((vehicleMap) {
+                  // The value stored in selectedVehicle and passed around
+                  final String value = '${vehicleMap['name']} ${vehicleMap['emoji']}';
+                  
+                  return RadioListTile<String>(
+                    // Build the title using a Row for custom text and emoji sizes
+                    title: Row(
+                      children: [
+                        Text(
+                          vehicleMap['name']!,
+                          style: const TextStyle(fontSize: 16),
+                        ),
+                        const SizedBox(width: 8),
+                        // Use a Text widget with increased font size for the emoji
+                        Text(
+                          vehicleMap['emoji']!,
+                          style: const TextStyle(fontSize: emojiFontSize),
+                        ),
+                      ],
+                    ),
+                    value: value,
+                    groupValue: tempSelected,
+                    onChanged: (String? newValue) {
+                      setStateSB(() {
+                        tempSelected = newValue;
+                      });
+                    },
+                  );
+                }).toList(),
+              ),
+              actions: <Widget>[
+                TextButton(
+                  child: const Text('Cancel'),
+                  onPressed: () {
+                    Navigator.of(context).pop();
+                  },
+                ),
+                TextButton(
+                  child: const Text('Select'),
+                  onPressed: () {
+                    // Return the selected value and close the dialog
+                    Navigator.of(context).pop(tempSelected);
+                  },
+                ),
+              ],
+            );
+          },
+        );
+      },
+    ).then((result) {
+      // Update the main state after the dialog is closed
+      if (result != null) {
+        setState(() {
+          selectedVehicle = result;
+        });
+      }
+    });
+  }
   
   @override
   Widget build(BuildContext context) {
@@ -224,8 +456,6 @@ class _PlanTabState extends State<PlanTab> {
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
-              // REMOVED: Header for Plan Tab (Icon and "Trip Planner" text)
-              // The SizedBox(height: 24) is kept to maintain initial spacing
               const SizedBox(height: 24),
               // Input fields start here
               TextField(
@@ -270,28 +500,34 @@ class _PlanTabState extends State<PlanTab> {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   Expanded(
-                    child: DropdownButtonFormField<String>(
-                      value: selectedVehicle,
-                      decoration: InputDecoration(
-                        labelText: "Vehicle",
-                        border: OutlineInputBorder(
+                    // Vehicle Selection: Replaced DropdownButtonFormField with custom input and dialog trigger
+                    child: GestureDetector(
+                      onTap: () => _showVehicleSelectionDialog(context),
+                      child: Container(
+                        height: 60, // Match height of TextField
+                        padding: const EdgeInsets.symmetric(horizontal: 12),
+                        decoration: BoxDecoration(
+                          border: Border.all(color: Colors.grey.shade400),
                           borderRadius: BorderRadius.circular(10),
                         ),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                      ),
-                      items: ['Bike 🏍️', 'Car 🚗', 'EV 🔋']
-                          .map(
-                            (vehicle) => DropdownMenuItem(
-                              value: vehicle,
-                              child: Text(vehicle),
+                        child: Row(
+                          children: [
+                            Expanded(
+                              child: Align(
+                                alignment: Alignment.centerLeft,
+                                child: Text(
+                                  selectedVehicle ?? "Vehicle",
+                                  style: TextStyle(
+                                    fontSize: 16,
+                                    color: selectedVehicle == null ? Colors.grey.shade600 : Colors.black,
+                                  ),
+                                ),
+                              ),
                             ),
-                          )
-                          .toList(),
-                      onChanged: (value) {
-                        setState(() {
-                          selectedVehicle = value;
-                        });
-                      },
+                            const Icon(Icons.arrow_drop_down, color: Colors.grey),
+                          ],
+                        ),
+                      ),
                     ),
                   ),
                   const SizedBox(width: 16),

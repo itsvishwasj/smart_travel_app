@@ -20,8 +20,10 @@ class _ExpenseTabState extends State<ExpenseTab> {
   final TextEditingController _membersController = TextEditingController();
 
   // Color Definitions and Save Function
-  final Color _peachColor = Colors.orange.shade300;
-  final Color _indigoColor = Colors.indigo.shade600;
+  // UPDATED COLORS
+  final Color _primaryButtonColor = const Color(0xFF928FD2);    // Add and Reset Button Color: #928FD2
+  final Color _clearButtonColor = const Color(0xFF7672CB);      // End Clear Button Color: #7672CB
+  final Color _indigoColor = Colors.indigo.shade600;            // KEPT for Save button and now Per Person text
 
   void _saveExpenses() {
     ScaffoldMessenger.of(context).showSnackBar(
@@ -176,7 +178,8 @@ class _ExpenseTabState extends State<ExpenseTab> {
               child: ElevatedButton(
                 onPressed: _addExpense,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: Colors.green.shade600,
+                  // COLOR CHANGE: Add button to 928FD2
+                  backgroundColor: _primaryButtonColor, 
                   foregroundColor: Colors.white,
                   shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
                   padding: EdgeInsets.zero,
@@ -252,12 +255,13 @@ class _ExpenseTabState extends State<ExpenseTab> {
                 child: ElevatedButton(
                   onPressed: _resetExpenses,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor: _peachColor, // Changed to Peach color,
+                    // COLOR CHANGE: Reset button to 928FD2
+                    backgroundColor: _primaryButtonColor, 
                     foregroundColor: Colors.white,
                     shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(5)),
                     padding: EdgeInsets.zero,
                   ),
-                  child: const Text("Clear", style: TextStyle(fontSize: 16)),
+                  child: const Text("Reset", style: TextStyle(fontSize: 16)),
                 ),
               ),
             ],
@@ -293,21 +297,29 @@ class _ExpenseTabState extends State<ExpenseTab> {
                 ),
                 const Divider(height: 15, color: Colors.indigoAccent),
                 Row(
-                  // FIX: Reduced the text length to prevent overflow
+                  // Per Person section color change
                   children: [
-                    const Icon(Icons.person, color: Colors.purple, size: 24),
+                    // ICON COLOR CHANGE: from purple to indigo
+                    Icon(Icons.person, color: Colors.indigo.shade700, size: 24),
                     const SizedBox(width: 10),
                     Text(
-                      // Only "Per Person" text is used now
                       "Per Person:", 
                       style: TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.bold, color: Colors.purple.shade700),
+                          fontSize: 18, 
+                          fontWeight: FontWeight.bold, 
+                          // TEXT COLOR CHANGE: from purple.shade700 to indigo.shade700
+                          color: Colors.indigo.shade700
+                      ),
                     ),
                     const Spacer(),
                     Text(
                       '₹$_perPersonCost',
                       style: TextStyle(
-                          fontSize: 18, fontWeight: FontWeight.bold, color: Colors.purple.shade700),
+                          fontSize: 18, 
+                          fontWeight: FontWeight.bold, 
+                          // VALUE COLOR CHANGE: from purple.shade700 to indigo.shade700
+                          color: Colors.indigo.shade700
+                      ),
                     ),
                   ],
                 ),
@@ -320,12 +332,13 @@ class _ExpenseTabState extends State<ExpenseTab> {
             width: double.infinity,
             child: Row(
               children: [
-                // Clear Button (Peach)
+                // Clear Button (End of Page)
                 Expanded(
                   child: ElevatedButton(
                     onPressed: _resetExpenses,
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: _peachColor, // Peach color
+                      // COLOR CHANGE: End clear button to 7672CB
+                      backgroundColor: _clearButtonColor, 
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 15),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
@@ -342,7 +355,7 @@ class _ExpenseTabState extends State<ExpenseTab> {
                   child: ElevatedButton(
                     onPressed: _saveExpenses, // Save function
                     style: ElevatedButton.styleFrom(
-                      backgroundColor: _indigoColor, // Indigo color
+                      backgroundColor: _indigoColor, // Indigo color (no change)
                       foregroundColor: Colors.white,
                       padding: const EdgeInsets.symmetric(vertical: 15),
                       shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
