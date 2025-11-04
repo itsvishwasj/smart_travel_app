@@ -1,3 +1,4 @@
+// weather_screen.dart
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import 'dart:convert';
@@ -15,6 +16,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
   final TextEditingController manualCityController = TextEditingController();
 
   // 1. API Key is now included
+  // REMINDER: Replace this with your actual, active OpenWeatherMap API Key.
   final String openWeatherApiKey = '06d0a20bef517ee7ebf3927738f276c0'; 
 
   List<String> routeStops = [];
@@ -76,13 +78,23 @@ class _WeatherScreenState extends State<WeatherScreen> {
     });
 
     // Construct the API URL using the city and API key
-    final url = Uri.parse(
-        'https://api.openweathermap.org/data/2.5/weather?q=$city&appid=$openWeatherApiKey&units=metric');
+    final String apiURL = 'https://api.openweathermap.org/data/2.5/weather?q=$city&appid=$openWeatherApiKey&units=metric';
+    final url = Uri.parse(apiURL);
+
+    // --- DEBUGGING: Print the URL being used ---
+    print('Fetching weather for: $city');
+    print('API URL: $apiURL');
+    // -------------------------------------------
 
     try {
       final response = await http.get(url);
 
       if (!mounted) return;
+
+      // --- DEBUGGING: Print the response status and body ---
+      print('API Response status code: ${response.statusCode}');
+      print('API Response body: ${response.body}');
+      // ----------------------------------------------------
 
       if (response.statusCode == 200) {
         final data = json.decode(response.body);
@@ -99,19 +111,43 @@ class _WeatherScreenState extends State<WeatherScreen> {
             'humidity': humidity,
           };
         });
-      } else {
-        // Handle city not found (404) or other API errors
+      } else if (response.statusCode == 404) {
+        // Explicitly handle 404 for city not found
         setState(() {
           weatherData[city] = {
             'temp': 'N/A',
-            'condition': 'City Not Found',
+            'condition': 'City Not Found (404)',
+            'humidity': 'N/A',
+          };
+        });
+      } else if (response.statusCode == 401) {
+        // Explicitly handle 401 for invalid API key
+        setState(() {
+          weatherData[city] = {
+            'temp': 'N/A',
+            'condition': 'Invalid API Key (401)',
             'humidity': 'N/A',
           };
         });
       }
+      else {
+        // Handle other API errors (e.g., 500 server error)
+        setState(() {
+          weatherData[city] = {
+            'temp': '!',
+            'condition': 'API Error: ${response.statusCode}',
+            'humidity': '!',
+          };
+        });
+      }
     } catch (e) {
-      // Handle network errors (e.g., no internet connection)
+      // Handle network errors (e.g., no internet connection, timeout)
       if (!mounted) return;
+
+      // --- DEBUGGING: Print the catch error ---
+      print('CATCH BLOCK ERROR: $e');
+      // ----------------------------------------
+      
       setState(() {
         weatherData[city] = {
           'temp': '!',
@@ -136,7 +172,7 @@ class _WeatherScreenState extends State<WeatherScreen> {
     }
   }
 
-  // --- UI Layout (Updated) ---
+  // --- UI Layout (FIXED FOR NULL SAFETY) ---
 
   @override
   Widget build(BuildContext context) {
@@ -172,10 +208,10 @@ class _WeatherScreenState extends State<WeatherScreen> {
                 ),
                 const SizedBox(height: 20),
 
-                // Title for the list (MODIFIED: Conditional display and centered)
+                // Title for the list
                 if (routeStops.isNotEmpty) ...[
-                  Center(
-                    child: const Text(
+                  const Center(
+                    child: Text(
                       "Route Stops Weather Forecast",
                       style: TextStyle(
                         fontSize: 18,
@@ -192,7 +228,16 @@ class _WeatherScreenState extends State<WeatherScreen> {
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: routeStops.map((city) {
                     final data = weatherData[city];
-                    final isLoaded = data != null && data['condition'] != 'Loading...';
+                    
+                    // FIX: Use ?? false to convert the resulting bool? to a non-nullable bool.
+                    final isLoading = (data?['condition'] == 'Loading...') ?? false;
+                    
+                    // FIX: Use ?? false for the same reason.
+                    final isError = (data?['condition']?.toString().contains('Error')) ?? false;
+                    
+                    // isLoaded implies it's not loading and not an error
+                    final isLoaded = !isLoading && !isError && data != null && data['temp'] != 'N/A' && data['temp'] != '!';
+
 
                     return Padding(
                       padding: const EdgeInsets.only(bottom: 12.0),
@@ -201,9 +246,9 @@ class _WeatherScreenState extends State<WeatherScreen> {
                         width: double.infinity,
                         padding: const EdgeInsets.all(16),
                         decoration: BoxDecoration(
-                          color: Colors.indigo.shade50,
+                          color: isError ? Colors.red.shade50 : Colors.indigo.shade50,
                           borderRadius: BorderRadius.circular(12),
-                          border: Border.all(color: Colors.indigo.shade100),
+                          border: Border.all(color: isError ? Colors.red.shade300 : Colors.indigo.shade100),
                         ),
                         child: Row(
                           mainAxisAlignment: MainAxisAlignment.spaceBetween,
@@ -216,18 +261,25 @@ class _WeatherScreenState extends State<WeatherScreen> {
                                 children: [
                                   Text(
                                     city,
-                                    style: const TextStyle(
-                                        fontSize: 18, fontWeight: FontWeight.bold),
+                                    style: TextStyle(
+                                        fontSize: 18, fontWeight: FontWeight.bold, color: isError ? Colors.red.shade900 : Colors.black),
                                   ),
                                   const SizedBox(height: 6),
+                                  
                                   if (isLoaded)
                                     Column(
                                       crossAxisAlignment: CrossAxisAlignment.start,
                                       children: [
-                                        Text("Temp: ${data['temp']}°C", style: const TextStyle(fontSize: 15)),
+                                        Text("Temp: ${data!['temp']}°C", style: const TextStyle(fontSize: 15)),
                                         Text("Condition: ${data['condition']}", style: const TextStyle(fontSize: 15)),
                                         Text("Humidity: ${data['humidity']}%", style: const TextStyle(fontSize: 15)),
                                       ],
+                                    )
+                                  else if (isError)
+                                    Text(
+                                      // data is definitely not null here, so we can use data!
+                                      "ERROR: ${data!['condition']}", 
+                                      style: TextStyle(color: Colors.red.shade700, fontStyle: FontStyle.italic, fontWeight: FontWeight.bold),
                                     )
                                   else
                                     const Text(
@@ -243,8 +295,8 @@ class _WeatherScreenState extends State<WeatherScreen> {
                               padding: const EdgeInsets.only(left: 12),
                               child: Text(
                                 isLoaded
-                                    ? getWeatherEmoji(data['condition'])
-                                    : "⏳",
+                                    ? getWeatherEmoji(data!['condition'])
+                                    : (isError ? "❌" : "⏳"),
                                 style: const TextStyle(fontSize: 40),
                               ),
                             ),

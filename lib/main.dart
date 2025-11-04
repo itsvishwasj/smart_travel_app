@@ -1,3 +1,4 @@
+// main.dart
 import 'package:flutter/material.dart';
 import 'dart:convert'; // Import for JSON handling
 // !!! IMPORTANT: The url_launcher package must be added to pubspec.yaml
