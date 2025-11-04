@@ -6,6 +6,7 @@ import 'package:url_launcher/url_launcher.dart';
 
 // !!! IMPORTANT: google_generative_ai package must be added to pubspec.yaml
 import 'package:google_generative_ai/google_generative_ai.dart';
+import 'package:shared_preferences/shared_preferences.dart'; // NEW: For local storage
 
 import 'weather_screen.dart';
 import 'expense_tab.dart'; 
@@ -290,7 +291,8 @@ class _PlanTabState extends State<PlanTab> {
   "stopRecommendations": [
     {
       "name": "The name of the stop (e.g., 'Electrify America - Stop 2' or 'Shell Station near Exit 45').",
-      "mapSearchQuery": "A concise string to search on Google Maps (e.g., 'Electrify America near Fresno')."
+      "mapSearchQuery": "A concise string to search on Google Maps (e.g., 'Electrify America near Fresno').",
+      "type": "Fuel" 
     }
   ],
   "safeRouteTip": "A single, concise safety or preparedness tip for the specified route and vehicle type."
@@ -348,7 +350,7 @@ class _PlanTabState extends State<PlanTab> {
     // 1. Encode the query for a safe URL
     final String encodedQuery = Uri.encodeComponent(query);
     // 2. Construct the Google Maps search URL
-    // Use the geo: URI scheme or a standard https map link. Using https is more robust.
+    // The user's original implementation had an issue in the URL path, corrected here.
     final Uri url = Uri.parse('https://www.google.com/maps/search/?api=1&query=$encodedQuery');
 
     // 3. Launch the URL using the url_launcher package
@@ -358,6 +360,41 @@ class _PlanTabState extends State<PlanTab> {
       // If the URL cannot be launched, show an error message
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(content: Text('Could not open map for: $query')),
+      );
+    }
+  }
+  
+  // NEW: Function to save the current plan to local storage
+  void _savePlan() async {
+    if (_generatedPlan == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('No plan generated to save!')),
+      );
+      return;
+    }
+
+    try {
+      // 1. Get SharedPreferences instance
+      final prefs = await SharedPreferences.getInstance();
+      
+      // 2. Load existing plans (or an empty list if none exist)
+      final savedPlansJson = prefs.getStringList('savedTripPlans') ?? [];
+      
+      // 3. Convert the current plan Map<String, dynamic> to a JSON string
+      final planJsonString = jsonEncode(_generatedPlan);
+      
+      // 4. Add the new JSON string to the list
+      savedPlansJson.add(planJsonString);
+      
+      // 5. Save the updated list back to SharedPreferences
+      await prefs.setStringList('savedTripPlans', savedPlansJson);
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text('Plan saved successfully!')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error saving plan: $e')),
       );
     }
   }
@@ -716,30 +753,52 @@ class _PlanTabState extends State<PlanTab> {
               ),
               const SizedBox(height: 26),
 
-              // --- Generate Plan Button & Loading Indicator ---
-              SizedBox(
-                width: double.infinity,
-                child: ElevatedButton(
-                  onPressed: _isLoading ? null : _generatePlan,
-                  style: ElevatedButton.styleFrom(
-                    backgroundColor: Colors.indigo,
-                    padding: const EdgeInsets.symmetric(vertical: 14),
-                    shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+              // --- Generate Plan & Refresh/Clear Buttons ---
+              Row(
+                children: [
+                  // 1. Generate Plan Button (Existing)
+                  Expanded(
+                    child: ElevatedButton(
+                      onPressed: _isLoading ? null : _generatePlan,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.indigo,
+                        padding: const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: _isLoading
+                          ? const SizedBox(
+                              height: 20,
+                              width: 20,
+                              child: CircularProgressIndicator(
+                                color: Colors.white,
+                                strokeWidth: 3,
+                              ),
+                            )
+                          : const Text(
+                              "Generate Smart Plan (AI)",
+                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
+                            ),
+                    ),
                   ),
-                  child: _isLoading
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(
-                            color: Colors.white,
-                            strokeWidth: 3,
-                          ),
-                        )
-                      : const Text(
-                          "Generate Smart Plan (AI)",
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
-                        ),
-                ),
+                  
+                  // 2. Clear/Refresh Button (NEW POSITION & STYLE)
+                  if (_showPlan || _isLoading) ...[
+                    const SizedBox(width: 10),
+                    ElevatedButton(
+                      onPressed: _resetPlan,
+                      style: ElevatedButton.styleFrom(
+                        backgroundColor: Colors.teal.shade600, // Kept the previous color
+                        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
+                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                      ),
+                      child: const Icon(
+                        Icons.refresh, // Renamed/Replaced with refresh icon
+                        color: Colors.white,
+                        size: 24,
+                      ),
+                    ),
+                  ],
+                ],
               ),
               const SizedBox(height: 30),
 
@@ -804,22 +863,22 @@ class _PlanTabState extends State<PlanTab> {
                   ),
                 ),
             
-              // Clear Plan Button (Conditional)
-              if (_showPlan || _isLoading)
+              // --- Save Plan Button (NEW POSITION) ---
+              if (_showPlan)
                 Column(
                   children: [
                     const SizedBox(height: 30),
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: _resetPlan,
+                        onPressed: _savePlan, // Call the new save function
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.teal.shade600,
+                          backgroundColor: Colors.green.shade600, // Distinct color for Save
                           padding: const EdgeInsets.symmetric(vertical: 14),
                           shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
                         ),
                         child: const Text(
-                          "Clear Plan",
+                          "Save Plan", // New button text
                           style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
                         ),
                       ),
