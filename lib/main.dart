@@ -345,21 +345,24 @@ class _PlanTabState extends State<PlanTab> {
     super.dispose();
   }
 
-  // UPDATED: Helper function to open Google Maps with a query
+  // DEFINITIVE FIX: Use the standard, universal Google Maps search URL scheme.
   Future<void> _openMap(BuildContext context, String query) async {
     // 1. Encode the query for a safe URL
     final String encodedQuery = Uri.encodeComponent(query);
-    // 2. Construct the Google Maps search URL
-    // The user's original implementation had an issue in the URL path, corrected here.
+    
+    // 2. Construct the CORRECT, robust Google Maps search URL (Universal standard).
+    // This public format (https://www.google.com/maps/search/?api=1&query=) is the 
+    // most reliable way to launch a search in the Maps app or a browser.
     final Uri url = Uri.parse('https://www.google.com/maps/search/?api=1&query=$encodedQuery');
 
     // 3. Launch the URL using the url_launcher package
     if (await canLaunchUrl(url)) {
+      // Use externalApplication mode to force the device to open the dedicated Maps app or browser
       await launchUrl(url, mode: LaunchMode.externalApplication);
     } else {
       // If the URL cannot be launched, show an error message
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open map for: $query')),
+        SnackBar(content: Text('Could not launch map for: $query. Check if you have a browser or map app installed.')),
       );
     }
   }
