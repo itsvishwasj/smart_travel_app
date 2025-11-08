@@ -269,7 +269,7 @@ class _PlanTabState extends State<PlanTab> {
   // --- GEMINI API CONSTANTS AND IMPLEMENTATION ---
   final String _apiKey = 'AIzaSyC2gkLJ-pDwn4LMH9E3zRRgCj9GKu0AwR4'; // User provided API key
 
-  // The JSON schema is only used for prompting the model to return structured data
+  // JSON schema for structured output
   final String _jsonSchemaTemplate = r'''
 {
   "itinerarySummary": "A one-paragraph summary of the proposed road trip itinerary tailored to the budget and vehicle type.",
@@ -295,7 +295,12 @@ class _PlanTabState extends State<PlanTab> {
       "type": "Fuel" 
     }
   ],
-  "safeRouteTip": "A single, concise safety or preparedness tip for the specified route and vehicle type."
+  "smartAdvisorTips": [
+    {
+      "heading": "A short, descriptive heading for the tip (e.g., 'Safety Tip', 'Budget Overview', 'Rainy Day Route')",
+      "tip": "The detailed, concise advice for the user."
+    }
+  ]
 }
 ''';
 
@@ -351,8 +356,6 @@ class _PlanTabState extends State<PlanTab> {
     final String encodedQuery = Uri.encodeComponent(query);
     
     // 2. Construct the CORRECT, robust Google Maps search URL (Universal standard).
-    // This public format (https://www.google.com/maps/search/?api=1&query=) is the 
-    // most reliable way to launch a search in the Maps app or a browser.
     final Uri url = Uri.parse('https://www.google.com/maps/search/?api=1&query=$encodedQuery');
 
     // 3. Launch the URL using the url_launcher package
@@ -446,12 +449,16 @@ class _PlanTabState extends State<PlanTab> {
     final String members = travellersController.text.isNotEmpty ? travellersController.text : '2';
     final String budget = budgetController.text.isNotEmpty ? '₹${budgetController.text}' : '₹10,000';
     final String vehicle = selectedVehicle ?? 'Car'; // Default to Car
+    
+    // Date Constraint
+    final String dateContext = 'Today is November 2025. The suggested itinerary must start within 3-4 days of this current time (e.g., Nov 11, 2025) and not in a far-off month like February.';
 
     // 2. Prepare CRITICAL INSTRUCTIONS (Logic)
     final int numMembers = int.tryParse(members) ?? 2;
     final int numRooms = (numMembers / 2).ceil();
 
-    final String accommodationLogic = "The $numMembers travelers will likely need about $numRooms room(s). Distribute the total budget of $budget across these rooms and the trip duration to find appropriate mid-range, cost-effective hotels.";
+    // Accommodation logic is for the **journey's overnight stops**, but the logic is now less about the final destination.
+    final String accommodationLogic = "The $numMembers travelers will likely need about $numRooms room(s). Distribute the total budget of $budget across these rooms and the trip duration to find appropriate mid-range, cost-effective hotels. Crucially, recommend accommodation in less expensive outskirts or satellite areas near the route's mid-points to save budget for the final destination.";
 
     String stopLogic;
     if (vehicle.toLowerCase().contains('ev')) {
@@ -460,17 +467,31 @@ class _PlanTabState extends State<PlanTab> {
       stopLogic = "Recommend **specific fuel stops** (e.g., Shell, BP) and major rest areas, ensuring they are well-spaced for a standard vehicle.";
     }
 
+    // UPDATED: Smart Advisor Logic to focus 100% on pre-destination road trip logistics and cost savings.
+    final String smartAdvisorLogic = '''
+    Generate a list of at least five highly practical tips for the 'smartAdvisorTips' array. The focus MUST be only on the road trip itself, from the start point to the end point, and NOT on activities once the destination is reached.
+
+    The required tips are:
+    1.  **Vehicle Suitability:** Heading 'Vehicle Choice Analysis'. Tip must state whether the chosen $vehicle is ideal for the $start to $end road trip based on traffic, road conditions, and distance, and specifically mention: **'Use bikes to avoid traffic, use cars in rainy weather.'**
+    2.  **Fuel Minimization:** Heading 'Fuel Expense Minimizer'. Tip must give a specific driving technique or route strategy to minimize fuel/EV charge costs *on this particular route*.
+    3.  **Food Minimization:** Heading 'On-Road Food Budget'. Tip must suggest practical ways to minimize food spending *during the drive*, such as where to stop cheaply or what to pack.
+    4.  **Weather/Route Safety:** Heading 'Monsoon/Rain Safety Route'. Suggest a specific alternative route or section to avoid known water-logging or high-traffic areas during heavy rain, saving time and fuel.
+    5.  **Traffic Avoidance:** Heading 'Traffic & Timing'. Suggest the best time of day (e.g., 'start at 4 AM') or a specific small detour to bypass the worst traffic congestion on the route.
+    ''';
+
     // 3. Construct the Final Prompt (NOW WITH JSON INSTRUCTION)
     final String finalPrompt = '''
-      You are a specialized travel planning AI. Your task is to generate a comprehensive road trip plan for a $days-day journey from $start to $end.
+      You are a specialized road trip planning AI. Your task is to generate a comprehensive road trip plan for a $days-day journey from $start to $end.
       The traveler is interested in: $interests.
       The travel party consists of $members members with a total trip budget of $budget (for all trip accommodation and stops).
       They are traveling in a $vehicle.
 
       **CRITICAL INSTRUCTIONS (MUST FOLLOW):**
-      1.  **ITINERARY and TOURIST STOPS:** The plan must include a logical sequence of stops and at least 3-5 must-see tourist attractions relevant to the user's interests.
-      2.  **ACCOMMODATION RULE:** $accommodationLogic
-      3.  **STOP RULE:** $stopLogic
+      1.  **ITINERARY and TOURIST STOPS:** The plan must include a logical sequence of stops and at least 3-5 must-see tourist attractions relevant to the user's interests. This should focus on stops ALONG THE ROUTE, not activities at the final destination.
+      2.  **DATE CONSTRAINT:** $dateContext
+      3.  **ACCOMMODATION RULE:** $accommodationLogic
+      4.  **STOP RULE:** $stopLogic
+      5.  **SMART ADVISOR RULE (CRITICAL FOCUS):** $smartAdvisorLogic
 
       **OUTPUT INSTRUCTION (CRITICAL):**
       You MUST ONLY return the response as a single, valid, raw JSON object that strictly adheres to this structure. Do not include any explanatory text, Markdown fences (like ```json), or code comments outside of the JSON object itself.
@@ -512,7 +533,6 @@ class _PlanTabState extends State<PlanTab> {
       setState(() {
         _isLoading = false;
       });
-      // Added a specific warning for the known version issue
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
           content: Text('Error generating plan. The AI likely failed to return clean JSON. Error: ${e.toString()}'),
@@ -854,13 +874,45 @@ class _PlanTabState extends State<PlanTab> {
                       ),
                       
                       const SizedBox(height: 24),
-                      // 6. Safety Tip
-                      const Text("🛡️ Safety Tip:",
-                          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+                      // 6. Smart Advisor Tips (NEW SECTION)
+                      const Text("💡 Smart Advisor Tips:",
+                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.indigo)),
                       Padding(
-                        padding: const EdgeInsets.only(left: 14, top: 10),
-                        child: Text(_generatedPlan!['safeRouteTip'] as String,
-                            style: const TextStyle(fontSize: 15)),
+                        padding: const EdgeInsets.only(top: 10),
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: (_generatedPlan!['smartAdvisorTips'] as List<dynamic>?)
+                              ?.map((tipItem) {
+                                final Map<String, dynamic> item = tipItem as Map<String, dynamic>;
+                                final String heading = item['heading'] as String? ?? 'Tip';
+                                final String tip = item['tip'] as String? ?? 'No detail provided.';
+                                
+                                return Padding(
+                                  padding: const EdgeInsets.only(bottom: 12),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      // Heading is now bold and styled
+                                      Text(
+                                        "• $heading",
+                                        style: TextStyle(
+                                          fontSize: 16,
+                                          fontWeight: FontWeight.bold,
+                                          color: Colors.indigo.shade700,
+                                        ),
+                                      ),
+                                      const SizedBox(height: 4),
+                                      // Tip is the body text
+                                      Text(
+                                        tip, 
+                                        style: const TextStyle(fontSize: 15),
+                                      ),
+                                    ],
+                                  ),
+                                );
+                              })
+                              .toList() ?? [const Text("No specific suggestions generated.")],
+                        ),
                       ),
                     ],
                   ),
