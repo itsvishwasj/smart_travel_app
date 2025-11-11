@@ -42,6 +42,7 @@ class MyApp extends StatelessWidget {
       ), 
       // --- NEW: Start with the AuthWrapper to check login state ---
       home: const AuthWrapper(),
+      debugShowCheckedModeBanner: false,
     );
   }
 }
@@ -83,6 +84,7 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   List<String> routeStops = []; // shared with Weather tab
+  
   // --- NEW: Logout Function ---
   Future<void> _logout() async {
     try {
@@ -160,9 +162,6 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           iconTheme: const IconThemeData(color: Colors.indigo),
-          actions: const [
-            // LOGOUT BUTTON REMOVED FROM HERE
-          ],
           bottom: const TabBar(
             labelColor: Colors.indigo,
             unselectedLabelColor: Colors.grey,
@@ -404,13 +403,14 @@ class _PlanTabState extends State<PlanTab> {
     super.dispose();
   }
 
+  // *** FIX IS HERE ***
   // DEFINITIVE FIX: Use the standard, universal Google Maps search URL scheme.
   Future<void> _openMap(BuildContext context, String query) async {
     // 1. Encode the query for a safe URL
     final String encodedQuery = Uri.encodeComponent(query);
     
     // 2. Construct the CORRECT, robust Google Maps search URL (Universal standard).
-    // The previous URL was incorrect. This uses the standard search query format:
+    // The previous URL was incorrect. This is the correct format:
     final Uri url = Uri.parse('https://www.google.com/maps/search/?api=1&query=$encodedQuery');
 
     // 3. Launch the URL using the url_launcher package
@@ -424,6 +424,7 @@ class _PlanTabState extends State<PlanTab> {
       );
     }
   }
+  // ******************
   
   // NEW: Function to save the current plan to local storage
   void _savePlan() async {
