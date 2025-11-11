@@ -1,0 +1,82 @@
+{
+  "project_info": {
+    "project_number": "421247859029",
+    "project_id": "smart-travel-assistant-001",
+    "storage_bucket": "smart-travel-assistant-001.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:421247859029:android:91701f9b7a389fb777d7dc",
+        "android_client_info": {
+          "package_name": "com.example.my_first_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "421247859029-kp2f5tf7itib3ik02sqtnie5n1findvg.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDMpbCGx46OVUoTYflWpSZWVA8MJLbBjM4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "421247859029-kp2f5tf7itib3ik02sqtnie5n1findvg.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "421247859029-0f1rf2grdf23hut6taespg0bukfomrl6.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.smartTravelApp"
+              }
+            }
+          ]
+        }
+      }
+    },
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:421247859029:android:27f364fd5d5af6f177d7dc",
+        "android_client_info": {
+          "package_name": "com.example.smart_travel_app"
+        }
+      },
+      "oauth_client": [
+        {
+          "client_id": "421247859029-kp2f5tf7itib3ik02sqtnie5n1findvg.apps.googleusercontent.com",
+          "client_type": 3
+        }
+      ],
+      "api_key": [
+        {
+          "current_key": "AIzaSyDMpbCGx46OVUoTYflWpSZWVA8MJLbBjM4"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": [
+            {
+              "client_id": "421247859029-kp2f5tf7itib3ik02sqtnie5n1findvg.apps.googleusercontent.com",
+              "client_type": 3
+            },
+            {
+              "client_id": "421247859029-0f1rf2grdf23hut6taespg0bukfomrl6.apps.googleusercontent.com",
+              "client_type": 2,
+              "ios_info": {
+                "bundle_id": "com.example.smartTravelApp"
+              }
+            }
+          ]
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

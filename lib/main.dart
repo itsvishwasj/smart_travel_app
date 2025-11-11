@@ -1,19 +1,31 @@
 // main.dart
 import 'package:flutter/material.dart';
 import 'dart:convert'; // Import for JSON handling
-// !!! IMPORTANT: The url_launcher package must be added to pubspec.yaml
 import 'package:url_launcher/url_launcher.dart'; 
-
-// !!! IMPORTANT: google_generative_ai package must be added to pubspec.yaml
 import 'package:google_generative_ai/google_generative_ai.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // NEW: For local storage
+import 'package:shared_preferences/shared_preferences.dart'; 
+
+// NEW IMPORTS for Firebase Auth and Login Screen
+import 'package:firebase_core/firebase_core.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'login_screen.dart'; // Ensure you have created this file
 
 import 'weather_screen.dart';
 import 'expense_tab.dart'; 
 import 'plans_history_screen.dart'; 
 import 'expenses_history_screen.dart'; 
 
-void main() {
+// --- NEW: Initialize Firebase in main() ---
+Future<void> main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  try {
+    // !!! IMPORTANT: You must configure Firebase for your platform
+    // You might need to replace this with your actual Firebase options, e.g.,
+    // await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform); 
+    await Firebase.initializeApp(); 
+  } catch (e) {
+    print('Error initializing Firebase: $e');
+  }
   runApp(const MyApp());
 }
 
@@ -28,10 +40,39 @@ class MyApp extends StatelessWidget {
         primarySwatch: Colors.indigo,
         useMaterial3: true,
       ), 
-      home: const HomeScreen(),
+      // --- NEW: Start with the AuthWrapper to check login state ---
+      home: const AuthWrapper(),
     );
   }
 }
+
+// --- NEW WIDGET: AuthWrapper to handle routing based on login status ---
+class AuthWrapper extends StatelessWidget {
+  const AuthWrapper({super.key});
+
+  @override
+  Widget build(BuildContext context) {
+    // StreamBuilder listens to the user's authentication state
+    return StreamBuilder<User?>(
+      stream: FirebaseAuth.instance.authStateChanges(),
+      builder: (context, snapshot) {
+        // Show a loading indicator while checking the auth state
+        if (snapshot.connectionState == ConnectionState.waiting) {
+          return const Scaffold(body: Center(child: CircularProgressIndicator()));
+        }
+        
+        // If the user is logged in (User object is not null)
+        if (snapshot.hasData && snapshot.data != null) {
+          return const HomeScreen(); // Navigate to the main app screen
+        }
+
+        // Otherwise, show the Login screen
+        return const LoginScreen();
+      },
+    );
+  }
+}
+// --------------------------------------------------------------------------
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -42,6 +83,17 @@ class HomeScreen extends StatefulWidget {
 
 class _HomeScreenState extends State<HomeScreen> {
   List<String> routeStops = []; // shared with Weather tab
+  // --- NEW: Logout Function ---
+  Future<void> _logout() async {
+    try {
+      await FirebaseAuth.instance.signOut();
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error signing out: $e')),
+      );
+    }
+  }
+  // ---------------------------
 
   // --- Navigation Helpers ---
   void _navigateToTab(int index, BuildContext context) {
@@ -87,6 +139,10 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
+    // Get the current user's email if logged in
+    final User? user = FirebaseAuth.instance.currentUser;
+    final String userEmail = user?.email ?? 'user.name@example.com';
+
     return DefaultTabController(
       length: 3,
       child: Scaffold(
@@ -126,17 +182,17 @@ class _HomeScreenState extends State<HomeScreen> {
             padding: EdgeInsets.zero,
             children: <Widget>[
               // Drawer Header
-              const UserAccountsDrawerHeader(
-                accountName: Text(
+              UserAccountsDrawerHeader(
+                accountName: const Text(
                   'Welcome, Traveler!',
                   style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
                 ),
-                accountEmail: Text('user.name@example.com', style: TextStyle(color: Colors.white70)),
-                currentAccountPicture: CircleAvatar(
+                accountEmail: Text(userEmail, style: const TextStyle(color: Colors.white70)),
+                currentAccountPicture: const CircleAvatar(
                   backgroundColor: Colors.white,
                   child: Icon(Icons.account_circle, size: 50, color: Colors.indigo),
                 ),
-                decoration: BoxDecoration(
+                decoration: const BoxDecoration(
                   color: Colors.indigo, // Primary color theme
                 ),
               ),
@@ -161,8 +217,8 @@ class _HomeScreenState extends State<HomeScreen> {
               
               // History Expansion Tile (COLOR CHANGED TO INDIGO)
               ExpansionTile(
-                leading: const Icon(Icons.history, color: Colors.indigo), // CHANGED from teal to indigo
-                title: const Text('History', style: TextStyle(color: Colors.indigo)), // CHANGED from teal to indigo
+                leading: const Icon(Icons.history, color: Colors.indigo), 
+                title: const Text('History', style: TextStyle(color: Colors.indigo)),
                 children: <Widget>[
                   ListTile(
                     title: const Padding(
@@ -206,15 +262,13 @@ class _HomeScreenState extends State<HomeScreen> {
                 },
               ),
 
-              // LOGOUT OPTION (COLOR CHANGED TO INDIGO)
+              // LOGOUT OPTION
               ListTile(
-                leading: const Icon(Icons.logout, color: Colors.indigo), // CHANGED from red to indigo
-                title: const Text('Logout', style: TextStyle(color: Colors.indigo)), // CHANGED from red to indigo
+                leading: const Icon(Icons.logout, color: Colors.red), // Use red for logout
+                title: const Text('Logout', style: TextStyle(color: Colors.red)), 
                 onTap: () {
                   Navigator.of(context).pop(); // Close the drawer first
-                  ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("Logout tapped")),
-                  );
+                  _logout(); // Call the Firebase logout function
                 },
               ),
             ],
@@ -240,7 +294,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 }
 
-// PlanTab Implementation
+// PlanTab Implementation (REST OF YOUR CODE REMAINS UNCHANGED)
 class PlanTab extends StatefulWidget {
   final Function(List<String>) onRouteUpdate; // callback to send routeStops to HomeScreen
   const PlanTab({Key? key, required this.onRouteUpdate}) : super(key: key);
@@ -356,6 +410,7 @@ class _PlanTabState extends State<PlanTab> {
     final String encodedQuery = Uri.encodeComponent(query);
     
     // 2. Construct the CORRECT, robust Google Maps search URL (Universal standard).
+    // The previous URL was incorrect. This uses the standard search query format:
     final Uri url = Uri.parse('https://www.google.com/maps/search/?api=1&query=$encodedQuery');
 
     // 3. Launch the URL using the url_launcher package
