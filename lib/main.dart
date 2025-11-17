@@ -4,11 +4,17 @@ import 'dart:convert'; // Import for JSON handling
 import 'package:url_launcher/url_launcher.dart'; 
 import 'package:google_generative_ai/google_generative_ai.dart';
 import 'package:shared_preferences/shared_preferences.dart'; 
+import 'package:intl/intl.dart'; // For date formatting and current time
 
 // NEW IMPORTS for Firebase Auth and Login Screen
 import 'package:firebase_core/firebase_core.dart';
 import 'package:firebase_auth/firebase_auth.dart';
+import 'firebase_options.dart'; // Import the generated Firebase options
 import 'login_screen.dart'; // Ensure you have created this file
+
+// NEW IMPORTS for Location Services
+import 'package:geolocator/geolocator.dart'; 
+import 'package:geocoding/geocoding.dart'; 
 
 import 'weather_screen.dart';
 import 'expense_tab.dart'; 
@@ -19,10 +25,8 @@ import 'expenses_history_screen.dart';
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
-    // !!! IMPORTANT: You must configure Firebase for your platform
-    // You might need to replace this with your actual Firebase options, e.g.,
-    // await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform); 
-    await Firebase.initializeApp(); 
+    // IMPORTANT: Use DefaultFirebaseOptions.currentPlatform if you have run 'flutterfire configure'
+    await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform); 
   } catch (e) {
     print('Error initializing Firebase: $e');
   }
@@ -306,9 +310,17 @@ class _PlanTabState extends State<PlanTab> {
   // Controllers for input fields
   final TextEditingController fromController = TextEditingController();
   final TextEditingController toController = TextEditingController();
-  final TextEditingController budgetController = TextEditingController();
   final TextEditingController daysController = TextEditingController();
   final TextEditingController travellersController = TextEditingController();
+  
+  // NEW: FocusNode for 'From' TextField to track focus state
+  final FocusNode _fromFocusNode = FocusNode();
+
+  // UPDATED: BUDGET SLIDER NEW STATE (Range 0.0 to 11.0)
+  double _budgetSliderValue = 5.0; // Default to mid-range
+  // Use this as the primary controller for display, initialized with the default slider value
+  // We use a helper function to determine the display text
+  final TextEditingController budgetController = TextEditingController(text: 'Mid Budget'); 
 
   String? selectedVehicle;
   
@@ -318,13 +330,134 @@ class _PlanTabState extends State<PlanTab> {
   bool get _showPlan => _generatedPlan != null; // Use a getter based on the plan data
 
   final ScrollController _scrollController = ScrollController();
+  
+  // State for location button visibility
+  bool _isLocating = false; // To show a loading indicator on the location button
+
+  // --- Date State Variables and Logic ---
+  DateTime? _startDate; 
+  String _startDateString = 'Select Start Date'; 
+
+  // Helper to convert the 0-11 slider value into a qualitative budget string
+  String _getBudgetLevel(double value) {
+    if (value >= 8) {
+      return 'High Budget';
+    } else if (value >= 4) {
+      return 'Mid Budget';
+    } else {
+      return 'Low Budget';
+    }
+  }
+
+  // Function to show the date picker dialog
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _startDate ?? DateTime.now(),
+      firstDate: DateTime.now(), // Cannot select a date before today
+      lastDate: DateTime(2030), // Limit to 2030 for now
+    );
+    if (picked != null && picked != _startDate) {
+      setState(() {
+        _startDate = picked;
+        // Format the date for display
+        _startDateString = DateFormat('EEE, MMM d, yyyy').format(picked);
+      });
+    }
+  }
+
+  // Helper to determine if a date is a weekend/weekday
+  String _getDayType(DateTime date) {
+    // DateTime.saturday is 6, DateTime.sunday is 7
+    if (date.weekday == DateTime.saturday || date.weekday == DateTime.sunday) {
+      return 'Weekend';
+    }
+    return 'Weekday';
+  }
+  // --- END Date State Variables and Logic ---
+
+  // --- NEW: Location Functions Implementation ---
+  
+  @override
+  void initState() {
+    super.initState();
+    // Listener to rebuild the widget when the 'From' field changes (for button visibility)
+    fromController.addListener(_onFromChanged);
+    // Listener to rebuild the widget when the focus of the 'From' field changes
+    _fromFocusNode.addListener(_onFocusChanged);
+  }
+
+  void _onFromChanged() {
+    // We call setState to potentially show/hide the location button
+    setState(() {});
+  }
+  
+  void _onFocusChanged() {
+    // We call setState to potentially show/hide the location button
+    setState(() {});
+  }
+
+  // Function to get current location and update the 'From' field
+  Future<void> _getCurrentLocation() async {
+    setState(() {
+      _isLocating = true;
+    });
+
+    try {
+      // 1. Check/Request Permission
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
+          throw Exception('Location permissions are denied. Please enable them in settings.');
+        }
+      }
+
+      // 2. Get Position
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high
+      );
+
+      // 3. Reverse Geocode (Convert Lat/Long to Address)
+      List<Placemark> placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
+      
+      String address = 'Unknown Location';
+      if (placemarks.isNotEmpty) {
+        final Placemark place = placemarks.first;
+        // Construct a clean, human-readable address: City, State/Region, Country
+        address = [place.locality, place.administrativeArea, place.country]
+            .where((element) => element != null && element.isNotEmpty)
+            .join(', ');
+      }
+
+      // 4. Update TextField
+      fromController.text = address;
+      
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Location set to: $address')),
+      );
+
+    } catch (e) {
+      // Handle any errors (permissions, service disabled, geocoding failure)
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error getting location: ${e.toString()}')),
+      );
+    } finally {
+      setState(() {
+        _isLocating = false;
+      });
+    }
+  }
+  // --- END Location Functions Implementation ---
+
 
   // --- GEMINI API CONSTANTS AND IMPLEMENTATION ---
   final String _apiKey = 'AIzaSyC2gkLJ-pDwn4LMH9E3zRRgCj9GKu0AwR4'; // User provided API key
 
-  // JSON schema for structured output
+  // UPDATED: JSON schema for structured output to include estimatedTotalCost
   final String _jsonSchemaTemplate = r'''
 {
+  "estimatedTotalCost": "A single string containing the estimated total cost for the trip in INR, e.g., '₹35,000 - ₹40,000' or 'INR 50,000 (Low Estimate)'.", 
   "itinerarySummary": "A one-paragraph summary of the proposed road trip itinerary tailored to the budget and vehicle type.",
   "routeStops": [
     "A list of key city names or landmarks that must be visited in order."
@@ -395,7 +528,10 @@ class _PlanTabState extends State<PlanTab> {
   @override
   void dispose() {
     _scrollController.dispose();
+    fromController.removeListener(_onFromChanged); 
     fromController.dispose();
+    _fromFocusNode.removeListener(_onFocusChanged); 
+    _fromFocusNode.dispose(); 
     toController.dispose();
     budgetController.dispose();
     daysController.dispose();
@@ -403,15 +539,15 @@ class _PlanTabState extends State<PlanTab> {
     super.dispose();
   }
 
-  // *** FIX IS HERE ***
-  // DEFINITIVE FIX: Use the standard, universal Google Maps search URL scheme.
+  // FIX 1: Corrected to use the standard, universal Google Maps search URL scheme.
   Future<void> _openMap(BuildContext context, String query) async {
     // 1. Encode the query for a safe URL
     final String encodedQuery = Uri.encodeComponent(query);
     
     // 2. Construct the CORRECT, robust Google Maps search URL (Universal standard).
-    // The previous URL was incorrect. This is the correct format:
+    // Use the correct Google Maps search URL with the encoded query
     final Uri url = Uri.parse('https://www.google.com/maps/search/?api=1&query=$encodedQuery');
+
 
     // 3. Launch the URL using the url_launcher package
     if (await canLaunchUrl(url)) {
@@ -424,7 +560,6 @@ class _PlanTabState extends State<PlanTab> {
       );
     }
   }
-  // ******************
   
   // NEW: Function to save the current plan to local storage
   void _savePlan() async {
@@ -443,7 +578,13 @@ class _PlanTabState extends State<PlanTab> {
       final savedPlansJson = prefs.getStringList('savedTripPlans') ?? [];
       
       // 3. Convert the current plan Map<String, dynamic> to a JSON string
-      final planJsonString = jsonEncode(_generatedPlan);
+      // Also add a timestamp for display in history
+      final Map<String, dynamic> planWithMetadata = {
+        'timestamp': DateTime.now().toIso8601String(),
+        ..._generatedPlan!,
+      };
+      
+      final planJsonString = jsonEncode(planWithMetadata);
       
       // 4. Add the new JSON string to the list
       savedPlansJson.add(planJsonString);
@@ -466,148 +607,29 @@ class _PlanTabState extends State<PlanTab> {
     setState(() {
       fromController.clear();
       toController.clear();
-      budgetController.clear();
+      // Reset the budget slider and controller text to default 'Mid Budget'
+      _budgetSliderValue = 5.0; 
+      budgetController.text = _getBudgetLevel(_budgetSliderValue);
       daysController.clear();
       travellersController.clear();
       selectedVehicle = null;
-      _generatedPlan = null; // Clear the generated plan
-      _isLoading = false;
-      widget.onRouteUpdate([]); // Notify HomeScreen to clear weather stops
+      _startDate = null; // Clear the start date
+      _startDateString = 'Select Start Date'; // Reset display string
+      _generatedPlan = null; // Clear the plan display
+      _isLoading = false; // Stop loading if it was running
+      widget.onRouteUpdate([]); // Clear route stops in parent
+      _scrollController.animateTo(
+        0.0,
+        duration: const Duration(milliseconds: 300),
+        curve: Curves.easeOut,
+      );
     });
-
-    ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text('Plan reset. Start a new trip!')),
-    );
   }
 
-  // Method to generate the travel plan using Gemini API
-  void _generatePlan() async {
-    if (fromController.text.isEmpty || toController.text.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please enter both From and To locations")),
-      );
-      return;
-    }
-
-    setState(() {
-      _isLoading = true;
-      _generatedPlan = null; // Clear previous plan
-    });
-
-    // 1. Prepare Variables for the Prompt
-    final String days = daysController.text.isNotEmpty ? daysController.text : '3';
-    final String start = fromController.text.trim();
-    final String end = toController.text.trim();
-    
-    // Hardcoded Interests (since no input field exists)
-    const String interests = 'scenic drives, local cuisine, and history'; 
-    
-    final String members = travellersController.text.isNotEmpty ? travellersController.text : '2';
-    final String budget = budgetController.text.isNotEmpty ? '₹${budgetController.text}' : '₹10,000';
-    final String vehicle = selectedVehicle ?? 'Car'; // Default to Car
-    
-    // Date Constraint
-    final String dateContext = 'Today is November 2025. The suggested itinerary must start within 3-4 days of this current time (e.g., Nov 11, 2025) and not in a far-off month like February.';
-
-    // 2. Prepare CRITICAL INSTRUCTIONS (Logic)
-    final int numMembers = int.tryParse(members) ?? 2;
-    final int numRooms = (numMembers / 2).ceil();
-
-    // Accommodation logic is for the **journey's overnight stops**, but the logic is now less about the final destination.
-    final String accommodationLogic = "The $numMembers travelers will likely need about $numRooms room(s). Distribute the total budget of $budget across these rooms and the trip duration to find appropriate mid-range, cost-effective hotels. Crucially, recommend accommodation in less expensive outskirts or satellite areas near the route's mid-points to save budget for the final destination.";
-
-    String stopLogic;
-    if (vehicle.toLowerCase().contains('ev')) {
-      stopLogic = "Recommend **specific EV charging stations** (e.g., Electrify America) and ensure they are well-spaced for an EV's range.";
-    } else {
-      stopLogic = "Recommend **specific fuel stops** (e.g., Shell, BP) and major rest areas, ensuring they are well-spaced for a standard vehicle.";
-    }
-
-    // UPDATED: Smart Advisor Logic to focus 100% on pre-destination road trip logistics and cost savings.
-    final String smartAdvisorLogic = '''
-    Generate a list of at least five highly practical tips for the 'smartAdvisorTips' array. The focus MUST be only on the road trip itself, from the start point to the end point, and NOT on activities once the destination is reached.
-
-    The required tips are:
-    1.  **Vehicle Suitability:** Heading 'Vehicle Choice Analysis'. Tip must state whether the chosen $vehicle is ideal for the $start to $end road trip based on traffic, road conditions, and distance, and specifically mention: **'Use bikes to avoid traffic, use cars in rainy weather.'**
-    2.  **Fuel Minimization:** Heading 'Fuel Expense Minimizer'. Tip must give a specific driving technique or route strategy to minimize fuel/EV charge costs *on this particular route*.
-    3.  **Food Minimization:** Heading 'On-Road Food Budget'. Tip must suggest practical ways to minimize food spending *during the drive*, such as where to stop cheaply or what to pack.
-    4.  **Weather/Route Safety:** Heading 'Monsoon/Rain Safety Route'. Suggest a specific alternative route or section to avoid known water-logging or high-traffic areas during heavy rain, saving time and fuel.
-    5.  **Traffic Avoidance:** Heading 'Traffic & Timing'. Suggest the best time of day (e.g., 'start at 4 AM') or a specific small detour to bypass the worst traffic congestion on the route.
-    ''';
-
-    // 3. Construct the Final Prompt (NOW WITH JSON INSTRUCTION)
-    final String finalPrompt = '''
-      You are a specialized road trip planning AI. Your task is to generate a comprehensive road trip plan for a $days-day journey from $start to $end.
-      The traveler is interested in: $interests.
-      The travel party consists of $members members with a total trip budget of $budget (for all trip accommodation and stops).
-      They are traveling in a $vehicle.
-
-      **CRITICAL INSTRUCTIONS (MUST FOLLOW):**
-      1.  **ITINERARY and TOURIST STOPS:** The plan must include a logical sequence of stops and at least 3-5 must-see tourist attractions relevant to the user's interests. This should focus on stops ALONG THE ROUTE, not activities at the final destination.
-      2.  **DATE CONSTRAINT:** $dateContext
-      3.  **ACCOMMODATION RULE:** $accommodationLogic
-      4.  **STOP RULE:** $stopLogic
-      5.  **SMART ADVISOR RULE (CRITICAL FOCUS):** $smartAdvisorLogic
-
-      **OUTPUT INSTRUCTION (CRITICAL):**
-      You MUST ONLY return the response as a single, valid, raw JSON object that strictly adheres to this structure. Do not include any explanatory text, Markdown fences (like ```json), or code comments outside of the JSON object itself.
-
-      JSON Structure to follow:
-      $_jsonSchemaTemplate
-    ''';
-
-    try {
-      // 4. Call the Gemini API
-      final Map<String, dynamic> result = await _callGeminiApi(finalPrompt);
-
-      setState(() {
-        _generatedPlan = result;
-        _isLoading = false;
-        
-        // 5. Send routeStops to HomeScreen for Weather tab
-        // Safely extract the list, handling potential null or wrong type by defaulting to an empty list
-        final List<String> routeStops = List<String>.from((_generatedPlan!['routeStops'] as List?)?.whereType<String>() ?? []);
-
-        widget.onRouteUpdate(routeStops);
-      });
-
-      // Scroll to bottom after generating plan
-      WidgetsBinding.instance.addPostFrameCallback((_) {
-        if (_scrollController.hasClients) {
-          _scrollController.animateTo(
-            _scrollController.position.maxScrollExtent,
-            duration: const Duration(milliseconds: 500),
-            curve: Curves.easeInOut,
-          );
-        }
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Smart plan generated by AI!')),
-      );
-
-    } catch (e) {
-      setState(() {
-        _isLoading = false;
-      });
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(
-          content: Text('Error generating plan. The AI likely failed to return clean JSON. Error: ${e.toString()}'),
-          duration: const Duration(seconds: 5),
-        ),
-      );
-    }
-  }
-
-  // METHOD: Show the modal radio button selection dialog
-  void _showVehicleSelectionDialog(BuildContext context) {
+  // --- VEHICLE SELECTION DIALOG ---
+  void _showVehicleSelectionDialog() {
     String? tempSelected = selectedVehicle;
-    final List<Map<String, String>> vehicles = const [
-      {'name': 'Bike', 'emoji': '🏍️'},
-      {'name': 'Car', 'emoji': '🚗'},
-      {'name': 'EV', 'emoji': '🔋'},
-    ];
-    
-    const double emojiFontSize = 26.0;
+    final List<String> vehicleOptions = ['Car', 'SUV', 'EV', 'Motorcycle', 'Bike'];
 
     showDialog<String>(
       context: context,
@@ -615,37 +637,23 @@ class _PlanTabState extends State<PlanTab> {
         return StatefulBuilder(
           builder: (context, setStateSB) {
             return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-              title: const Text('Select Vehicle'),
-              contentPadding: const EdgeInsets.only(top: 12.0),
-              content: Column(
-                mainAxisSize: MainAxisSize.min,
-                children: vehicles.map((vehicleMap) {
-                  final String value = '${vehicleMap['name']} ${vehicleMap['emoji']}';
-                  
-                  return RadioListTile<String>(
-                    title: Row(
-                      children: [
-                        Text(
-                          vehicleMap['name']!,
-                          style: const TextStyle(fontSize: 16),
-                        ),
-                        const SizedBox(width: 8),
-                        Text(
-                          vehicleMap['emoji']!,
-                          style: const TextStyle(fontSize: emojiFontSize),
-                        ),
-                      ],
-                    ),
-                    value: value,
-                    groupValue: tempSelected,
-                    onChanged: (String? newValue) {
-                      setStateSB(() {
-                        tempSelected = newValue;
-                      });
-                    },
-                  );
-                }).toList(),
+              title: const Text('Select Vehicle Type'),
+              content: SingleChildScrollView(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: vehicleOptions.map((String value) {
+                    return RadioListTile<String>(
+                      title: Text(value),
+                      value: value,
+                      groupValue: tempSelected,
+                      onChanged: (String? newValue) {
+                        setStateSB(() {
+                          tempSelected = newValue;
+                        });
+                      },
+                    );
+                  }).toList(),
+                ),
               ),
               actions: <Widget>[
                 TextButton(
@@ -674,305 +682,609 @@ class _PlanTabState extends State<PlanTab> {
     });
   }
 
-  // UPDATED: Helper widget to build the sections based on Gemini's JSON output
+  // FIX 2: Added a missing closing parenthesis `)` after the `item` block inside the `items.map` function,
+  // which was causing the "Can't find ')'" error at the start of the next build method.
   Widget _buildPlanSection(String title, List<dynamic> items, {bool isRoute = false}) {
+    if (items.isEmpty) return const SizedBox.shrink();
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         const SizedBox(height: 24),
-        Text(title,
-            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
+        Text(title, style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
         Padding(
           padding: const EdgeInsets.only(left: 14, top: 10),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: items.map((item) {
-              String name;
-              String? mapQuery;
-
+              
               if (isRoute) {
                 // Handle routeStops (simple list of strings)
-                name = item as String;
+                final name = item as String;
                 final index = items.indexOf(item);
                 final isLast = index == items.length - 1;
-                return Text(isLast ? "• $name" : "• $name →" , style: const TextStyle(fontSize: 15));
-              } else {
-                // Handle complex objects (tourist, hotels, stops)
-                final itemMap = item as Map<String, dynamic>;
-                name = itemMap['name'] as String;
-                mapQuery = itemMap['mapSearchQuery'] as String;
-
-                // CORRECTED: Tap action now calls the _openMap function
-                return GestureDetector(
-                  onTap: () => _openMap(context, mapQuery!),
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Text(
-                      "• $name",
-                      style: TextStyle(
-                          color: Colors.indigo.shade700,
-                          fontSize: 15,
-                          decoration: TextDecoration.underline),
+                
+                return Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Row(
+                      children: [
+                        Icon(isLast ? Icons.location_on : Icons.arrow_downward, 
+                             color: isLast ? Colors.red : Colors.indigo, size: 18),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Text(
+                            name,
+                            style: TextStyle(
+                              fontWeight: isLast ? FontWeight.bold : FontWeight.normal,
+                              color: isLast ? Colors.red : Colors.black,
+                            ),
+                          ),
+                        ),
+                      ],
                     ),
-                  ), 
-                ); 
+                    if (!isLast) const SizedBox(height: 10), // Spacing between route points
+                  ],
+                );
+              } 
+              
+              // Handle all map-based items (Tourist, Hotel, Stop, Smart Advisor)
+              else if (item is Map<String, dynamic>) {
+                
+                // Smart Advisor Tips (Heading/Tip structure)
+                if (title.contains('Smart Advisor')) {
+                  final String heading = item['heading'] as String? ?? 'Tip';
+                  final String tip = item['tip'] as String? ?? 'No advice.';
+                  
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 15),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text('• $heading', style: const TextStyle(fontWeight: FontWeight.bold, color: Colors.indigo)),
+                        const SizedBox(height: 2),
+                        Text(tip),
+                      ],
+                    ),
+                  );
+                } 
+                
+                // Tourist/Hotel/Stop Recommendations (Name/MapQuery structure)
+                else {
+                  final name = item['name'] as String? ?? 'N/A';
+                  final mapQuery = item['mapSearchQuery'] as String?;
+                  
+                  return Padding(
+                    padding: const EdgeInsets.only(bottom: 10),
+                    child: Row(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Padding(
+                          padding: const EdgeInsets.only(top: 4.0),
+                          child: Icon(
+                            title.contains('Hotel') ? Icons.hotel : 
+                            title.contains('Stop') ? Icons.local_gas_station :
+                            Icons.camera_alt,
+                            color: Colors.indigo.shade400,
+                            size: 18,
+                          ),
+                        ),
+                        const SizedBox(width: 8),
+                        Expanded(
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(name, style: const TextStyle(fontWeight: FontWeight.w500)),
+                              if (mapQuery != null && mapQuery.isNotEmpty)
+                                GestureDetector(
+                                  onTap: () => _openMap(context, mapQuery),
+                                  child: Text(
+                                    'Find on Map 🗺️',
+                                    style: TextStyle(color: Colors.blue.shade700, decoration: TextDecoration.underline, fontSize: 13),
+                                  ),
+                                ),
+                            ],
+                          ),
+                        ),
+                      ],
+                    ),
+                  );
+                }
               }
+              
+              return const SizedBox.shrink(); // Fallback for unexpected item type
             }).toList(),
           ),
         ),
       ],
     );
   }
-  
+
+
+  // --- MAIN API CALL LOGIC ---
+  Future<void> _generatePlan() async {
+    if (fromController.text.isEmpty || toController.text.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("Please enter both From and To locations")),
+      );
+      return;
+    }
+
+    setState(() {
+      _isLoading = true;
+      _generatedPlan = null; // Clear previous plan
+    });
+
+    // 1. Prepare Variables for the Prompt
+    final String days = daysController.text.isNotEmpty ? daysController.text : '3';
+    final String start = fromController.text.trim();
+    final String end = toController.text.trim();
+    // Hardcoded Interests (since no input field exists)
+    const String interests = 'scenic drives, local cuisine, and history';
+    final String members = travellersController.text.isNotEmpty ? travellersController.text : '2';
+    // Use the qualitative budget level from the slider
+    final String budget = _getBudgetLevel(_budgetSliderValue);
+    final String vehicle = selectedVehicle ?? 'Car'; // Default to Car
+
+    // Date Context Logic
+    String dayType = 'Weekday';
+    String dateInfo = '';
+    String tripStartDateText = 'Not Specified';
+
+    if (_startDate != null) {
+      dayType = _getDayType(_startDate!);
+      tripStartDateText = DateFormat('EEE, MMM d, yyyy').format(_startDate!);
+      // Inform the model about the date for better planning (e.g., peak season, holidays)
+      dateInfo = "The trip starts on $tripStartDateText, which is a $dayType. Plan for potential weekend/holiday crowds or business closures.";
+    } else {
+      dateInfo = "No specific start date provided. Assume the trip occurs on a generic $dayType.";
+    }
+
+
+    // 2. Define Complex Logic Instructions for the Model
+    
+    // Budget Estimation Logic
+    final String budgetEstimationInstruction = "Generate a realistic total cost estimate for the entire $days day trip for $members people in India (INR). The estimate MUST be a single string in the 'estimatedTotalCost' field and must be tailored to the **$budget** level.";
+
+    // Accommodation Logic
+    final String accommodationLogic = "For 'hotelRecommendations', recommend 3-5 specific hotels/stays suitable for a **$budget** traveler (e.g., budget hostels for 'Low Budget', 4-star hotels for 'High Budget'). Crucially, recommend accommodation in less expensive outskirts or satellite areas near the route's mid-points to save budget for the final destination. Ensure the recommendations are tailored to a $dayType.";
+
+    // Stop Logic (Fuel/EV)
+    String stopLogic;
+    if (vehicle.toLowerCase().contains('ev')) {
+      stopLogic = "Recommend **specific EV charging stations** (e.g., Electrify America) and ensure they are well-spaced for an EV's range.";
+    } else {
+      stopLogic = "Recommend **specific fuel stops** (e.g., Shell, BP) and major rest areas, ensuring they are well-spaced for a standard vehicle.";
+    }
+
+    // Smart Advisor Logic
+    final String smartAdvisorLogic = '''
+Generate a list of at least five highly practical tips for the 'smartAdvisorTips' array. The focus MUST be only on the road trip itself, from the start point to the end point, and NOT on activities once the destination is reached. The required tips are:
+1. **Vehicle Suitability:** Heading 'Vehicle Choice Analysis'. Tip must state whether the chosen $vehicle is ideal for the $start to $end road trip based on traffic, road conditions, and distance, and specifically mention: **'Use bikes to avoid traffic, use cars in rainy weather.'**
+2. **Weather Preparation:** Heading 'Current Weather Check'. Tip must advise the user to check the weather forecast for their specific route stops (from 'routeStops' list) **before leaving**.
+3. **Route Safety:** Heading 'Safety First'. Tip must provide one specific, actionable safety tip for driving on the roads between $start and $end.
+4. **Budget Tip:** Heading 'Budget Strategy'. Tip must provide one actionable advice related to saving money on the road, such as: **'Opt for local street food instead of formal restaurants.'**
+5. **Route Planning Tip:** Heading 'Navigation & Stops'. Tip must advise the user to pre-download maps and look up specific opening/closing times for the 'touristStops'.
+''';
+
+
+    // 3. Construct the FINAL PROMPT
+    final String finalPrompt = '''
+You are an expert travel planner. Generate a comprehensive road trip plan in a strict JSON format for a $days-day trip from $start to $end for $members people who are interested in $interests and are traveling in a $vehicle. 
+
+**CRITICAL INSTRUCTIONS (MUST FOLLOW):**
+1. **BUDGET ESTIMATION (CRITICAL):** $budgetEstimationInstruction
+2. **ITINERARY and TOURIST STOPS:** The plan must include a logical sequence of stops and at least 3-5 must-see tourist attractions relevant to the user's interests. This should focus on stops ALONG THE ROUTE, not activities at the final destination. The plan must be fully tailored to the **$budget** level.
+3. **DATE CONSTRAINT:** $dateInfo
+4. **ACCOMMODATION RULE:** $accommodationLogic
+5. **STOP RULE:** $stopLogic
+6. **SMART ADVISOR RULE (CRITICAL FOCUS):** $smartAdvisorLogic
+
+**OUTPUT INSTRUCTION (CRITICAL):** You MUST ONLY return the response as a single, valid, raw JSON object that strictly adheres to this structure. Do not include any explanatory text, Markdown fences (like \`\`\`json), or code comments outside of the JSON object itself.
+JSON Structure to follow:
+$_jsonSchemaTemplate
+''';
+
+
+    try {
+      // 4. Call the Gemini API
+      final Map<String, dynamic> result = await _callGeminiApi(finalPrompt);
+
+      setState(() {
+        _generatedPlan = result;
+        _isLoading = false;
+
+        // 5. Send routeStops to HomeScreen for Weather tab
+        // Safely extract the list, handling potential null or wrong type by defaulting to an empty list
+        final List<String> stops = (_generatedPlan!['routeStops'] as List<dynamic>?)
+                ?.map((e) => e.toString())
+                .toList() ??
+            [];
+        widget.onRouteUpdate(stops);
+        
+        // 6. Scroll to the plan section
+        WidgetsBinding.instance.addPostFrameCallback((_) {
+          _scrollController.animateTo(
+            _scrollController.position.maxScrollExtent,
+            duration: const Duration(milliseconds: 500),
+            curve: Curves.easeOut,
+          );
+        });
+      });
+    } catch (e) {
+      setState(() {
+        _isLoading = false;
+      });
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Plan generation failed: ${e.toString()}')),
+      );
+    }
+  }
+  // --- END MAIN API CALL LOGIC ---
+
+
   @override
   Widget build(BuildContext context) {
-    return SingleChildScrollView(
-      controller: _scrollController,
-      padding: const EdgeInsets.all(20.0),
-      child: Card(
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-        elevation: 8,
-        child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 24.0, horizontal: 26.0),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              const SizedBox(height: 24),
-              // --- Input Fields ---
-              TextField(
-                controller: fromController,
-                decoration: InputDecoration(
-                  labelText: "From",
-                  hintText: "e.g., Bengaluru",
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: toController,
-                decoration: InputDecoration(
-                  labelText: "To",
-                  hintText: "e.g., Goa",
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                ),
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: budgetController,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText: "Budget (Total Trip)",
-                  hintText: "e.g., 5000 (INR)",
-                  prefix: const Text('₹ '),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                ),
-              ),
-              const SizedBox(height: 16),
-              Row(
-                mainAxisAlignment: MainAxisAlignment.center,
-                children: [
-                  Expanded(
-                    child: GestureDetector(
-                      onTap: () => _showVehicleSelectionDialog(context),
-                      child: Container(
-                        height: 60,
-                        padding: const EdgeInsets.symmetric(horizontal: 12),
-                        decoration: BoxDecoration(
-                          border: Border.all(color: Colors.grey.shade400),
-                          borderRadius: BorderRadius.circular(10),
-                        ),
-                        child: Row(
-                          children: [
-                            Expanded(
-                              child: Align(
-                                alignment: Alignment.centerLeft,
-                                child: Text(
-                                  selectedVehicle ?? "Vehicle",
-                                  style: TextStyle(
-                                    fontSize: 16,
-                                    color: selectedVehicle == null ? Colors.grey.shade600 : Colors.black,
-                                  ),
-                                ),
-                              ),
-                            ),
-                            const Icon(Icons.arrow_drop_down, color: Colors.grey),
-                          ],
-                        ),
-                      ),
-                    ),
-                  ),
-                  const SizedBox(width: 16),
-                  Expanded(
-                    child: TextField(
-                      controller: daysController,
-                      keyboardType: TextInputType.number,
-                      decoration: InputDecoration(
-                        labelText: "Days",
-                        hintText: "e.g., 5",
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                      ),
-                    ),
-                  ),
-                ],
-              ),
-              const SizedBox(height: 16),
-              TextField(
-                controller: travellersController,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText: "No. of travellers",
-                  hintText: "e.g., 2",
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-                ),
-              ),
-              const SizedBox(height: 26),
+    // Determine if the location button should be shown (only when 'From' field is not focused or is empty)
+    final bool showCurrentLocationOption = fromController.text.isEmpty && _fromFocusNode.hasFocus == false && !_isLocating;
 
-              // --- Generate Plan & Refresh/Clear Buttons ---
-              Row(
-                children: [
-                  // 1. Generate Plan Button (Existing)
-                  Expanded(
-                    child: ElevatedButton(
-                      onPressed: _isLoading ? null : _generatePlan,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.indigo,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-                      ),
-                      child: _isLoading
-                          ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(
-                                color: Colors.white,
-                                strokeWidth: 3,
-                              ),
-                            )
-                          : const Text(
-                              "Generate Smart Plan (AI)",
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
+    // Formatting for display (used in the generated plan output)
+    final String formattedNow = DateFormat('MMM d, yyyy - hh:mm a').format(DateTime.now());
+    final String tripStartDateText = _startDate != null 
+        ? DateFormat('EEE, MMM d, yyyy').format(_startDate!) 
+        : 'Not Specified';
+    
+    // --- Plan Generation UI ---
+    return SingleChildScrollView( 
+      controller: _scrollController,
+      child: Container(
+        color: const Color(0xFFEAF3FF),
+        padding: const EdgeInsets.all(20.0),
+        child: Card(
+          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          elevation: 8,
+          child: Padding(
+            padding: const EdgeInsets.symmetric(vertical: 24.0, horizontal: 26.0),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                // Section Title
+                const Text(
+                  "Generate Your Road Trip Plan 🗺️",
+                  style: TextStyle(
+                    fontSize: 24,
+                    fontWeight: FontWeight.bold,
+                    color: Colors.indigo,
+                  ),
+                ),
+                const Divider(color: Colors.indigo),
+                const SizedBox(height: 16),
+                
+                // From Input with Location Button
+                TextField(
+                  controller: fromController,
+                  focusNode: _fromFocusNode, // Attach focus node
+                  decoration: InputDecoration(
+                    labelText: "From",
+                    hintText: "e.g., Delhi",
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                ),
+                
+                // --- NEW: Use Current Location Option ---
+                if (showCurrentLocationOption)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 8.0),
+                    child: GestureDetector(
+                      onTap: _isLocating ? null : _getCurrentLocation,
+                      child: Row(
+                        mainAxisSize: MainAxisSize.min,
+                        children: [
+                          _isLocating 
+                              ? const SizedBox(
+                                  height: 16,
+                                  width: 16,
+                                  child: CircularProgressIndicator(
+                                    strokeWidth: 2,
+                                    color: Colors.indigo,
+                                  ),
+                                )
+                              : Icon(
+                                  Icons.my_location,
+                                  color: Colors.indigo.shade700,
+                                  size: 18
+                                ),
+                          const SizedBox(width: 8),
+                          Text(
+                            _isLocating ? 'Locating...' : 'Use current location',
+                            style: TextStyle(
+                              color: Colors.indigo.shade700,
+                              fontWeight: FontWeight.w500,
                             ),
+                          ),
+                        ],
+                      ),
                     ),
                   ),
-                  
-                  // 2. Clear/Refresh Button (NEW POSITION & STYLE)
-                  if (_showPlan || _isLoading) ...[
-                    const SizedBox(width: 10),
-                    ElevatedButton(
-                      onPressed: _resetPlan,
-                      style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.teal.shade600, // Kept the previous color
-                        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                // --- END NEW: Use Current Location Option ---
+                
+                const SizedBox(height: 16),
+                
+                TextField(
+                  controller: toController,
+                  decoration: InputDecoration(
+                    labelText: "To",
+                    hintText: "e.g., Goa",
+                    border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                    contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                  ),
+                ),
+                
+                const SizedBox(height: 16),
+
+                // --- BUDGET SLIDER INPUT SECTION (UPDATED FOR 0-11 SCALE) ---
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Budget Level: ${_getBudgetLevel(_budgetSliderValue)}',
+                      style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold, color: Colors.indigo),
+                    ),
+                    Slider(
+                      value: _budgetSliderValue,
+                      min: 0.0,
+                      max: 11.0,
+                      divisions: 11, // 0 to 11 gives 12 discrete values
+                      label: _getBudgetLevel(_budgetSliderValue),
+                      activeColor: Colors.indigo,
+                      inactiveColor: Colors.indigo.shade100,
+                      onChanged: (double newValue) {
+                        setState(() {
+                          _budgetSliderValue = newValue;
+                        });
+                      },
+                    ),
+                    const Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text('Low Budget', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                        Text('Mid Budget', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                        Text('High Budget', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      ],
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 16),
+
+                // Vehicle Type Selection
+                GestureDetector(
+                  onTap: _showVehicleSelectionDialog,
+                  child: Container(
+                    height: 60,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade400),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          selectedVehicle == null
+                              ? 'Select Vehicle Type'
+                              : 'Vehicle Type: $selectedVehicle',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: selectedVehicle == null ? Colors.grey.shade600 : Colors.black,
+                          ),
+                        ),
+                        const Icon(Icons.arrow_drop_down, color: Colors.indigo),
+                      ],
+                    ),
+                  ),
+                ),
+                const SizedBox(height: 16),
+
+                // Days & Travellers in a Row
+                Row(
+                  children: [
+                    // Days Input
+                    Expanded(
+                      child: TextField(
+                        controller: daysController,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: "Days",
+                          hintText: "e.g., 5",
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                        ),
                       ),
-                      child: const Icon(
-                        Icons.refresh, // Renamed/Replaced with refresh icon
-                        color: Colors.white,
-                        size: 24,
+                    ),
+                    const SizedBox(width: 16),
+                    // Travellers Input
+                    Expanded(
+                      child: TextField(
+                        controller: travellersController,
+                        keyboardType: TextInputType.number,
+                        decoration: InputDecoration(
+                          labelText: "No. of travellers",
+                          hintText: "e.g., 2",
+                          border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
+                          contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                        ),
                       ),
                     ),
                   ],
-                ],
-              ),
-              const SizedBox(height: 30),
-
-              // --- AI GENERATED PLAN OUTPUT ---
-              if (_showPlan)
-                Container(
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: Colors.indigo.shade50,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  padding: const EdgeInsets.all(22),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // 1. Summary
-                      Text(
-                        "Trip Plan from ${fromController.text} to ${toController.text}",
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
-                      ),
-                      const Divider(color: Colors.indigo),
-                      Text(
-                        _generatedPlan!['itinerarySummary'] as String,
-                        style: const TextStyle(fontSize: 15, fontStyle: FontStyle.italic),
-                      ),
-                      
-                      // 2. Directions/Route Stops
-                      _buildPlanSection(
-                        "🚗 Recommended Route:", 
-                        _generatedPlan!['routeStops'] as List<dynamic>, 
-                        isRoute: true,
-                      ),
-
-                      // 3. Tourist Stops
-                      _buildPlanSection(
-                        "📸 Must-See Tourist Stops (Click to Map):", 
-                        _generatedPlan!['touristStops'] as List<dynamic>,
-                      ),
-
-                      // 4. Hotel Recommendations
-                      _buildPlanSection(
-                        "🏨 Hotel Recommendations (Click to Map):", 
-                        _generatedPlan!['hotelRecommendations'] as List<dynamic>,
-                      ),
-
-                      // 5. Fuel/Rest Stops
-                      _buildPlanSection(
-                        "⛽ Service Stops (Click to Map):", 
-                        _generatedPlan!['stopRecommendations'] as List<dynamic>,
-                      ),
-                      
-                      const SizedBox(height: 24),
-                      // 6. Smart Advisor Tips (NEW SECTION)
-                      const Text("💡 Smart Advisor Tips:",
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.indigo)),
-                      Padding(
-                        padding: const EdgeInsets.only(top: 10),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: (_generatedPlan!['smartAdvisorTips'] as List<dynamic>?)
-                              ?.map((tipItem) {
-                                final Map<String, dynamic> item = tipItem as Map<String, dynamic>;
-                                final String heading = item['heading'] as String? ?? 'Tip';
-                                final String tip = item['tip'] as String? ?? 'No detail provided.';
-                                
-                                return Padding(
-                                  padding: const EdgeInsets.only(bottom: 12),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      // Heading is now bold and styled
-                                      Text(
-                                        "• $heading",
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.indigo.shade700,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      // Tip is the body text
-                                      Text(
-                                        tip, 
-                                        style: const TextStyle(fontSize: 15),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              })
-                              .toList() ?? [const Text("No specific suggestions generated.")],
+                ),
+                const SizedBox(height: 16),
+                
+                // --- Trip Start Date Input (Neutral Style) ---
+                GestureDetector(
+                  onTap: () => _selectDate(context),
+                  child: Container(
+                    height: 60,
+                    padding: const EdgeInsets.symmetric(horizontal: 12),
+                    decoration: BoxDecoration(
+                      border: Border.all(color: Colors.grey.shade400),
+                      borderRadius: BorderRadius.circular(10),
+                    ),
+                    child: Row(
+                      mainAxisAlignment: MainAxisAlignment.spaceBetween,
+                      children: [
+                        Text(
+                          _startDateString == 'Select Start Date' 
+                              ? 'Start Date' 
+                              : 'Start Date: ${_startDateString}',
+                          style: TextStyle(
+                            fontSize: 16,
+                            color: _startDateString == 'Select Start Date' ? Colors.grey.shade600 : Colors.black,
+                          ),
                         ),
-                      ),
-                    ],
+                        Icon(
+                          Icons.calendar_month,
+                          color: _startDateString == 'Select Start Date' ? Colors.indigo : Colors.green,
+                        ),
+                      ],
+                    ),
                   ),
                 ),
+
+                const SizedBox(height: 24),
+
+                // Generate Plan Button
+                SizedBox(
+                  width: double.infinity,
+                  child: ElevatedButton(
+                    onPressed: _isLoading ? null : _generatePlan,
+                    style: ElevatedButton.styleFrom(
+                      backgroundColor: Colors.indigo,
+                      foregroundColor: Colors.white,
+                      padding: const EdgeInsets.symmetric(vertical: 14),
+                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                    ),
+                    child: _isLoading
+                        ? const CircularProgressIndicator(color: Colors.white)
+                        : const Text(
+                            "Generate Plan",
+                            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
+                          ),
+                  ),
+                ),
+                
+                // Reset Button
+                if (!_isLoading)
+                Padding(
+                  padding: const EdgeInsets.only(top: 8.0),
+                  child: SizedBox(
+                    width: double.infinity,
+                    child: TextButton(
+                      onPressed: _resetPlan,
+                      child: Text(
+                        "Reset Form",
+                        style: TextStyle(color: Colors.red.shade700, fontWeight: FontWeight.bold),
+                      ),
+                    ),
+                  ),
+                ),
+
+                // --- Plan Output Section ---
+                if (_showPlan)
+                  Padding(
+                    padding: const EdgeInsets.only(top: 30.0),
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        // Plan Summary Header
+                        const Text(
+                          "Generated Trip Itinerary 🎉",
+                          style: TextStyle(
+                            fontSize: 24,
+                            fontWeight: FontWeight.bold,
+                            color: Colors.green, // Highlighted color
+                          ),
+                        ),
+                        
+                        // Metadata (Date & Time)
+                        Padding(
+                          padding: const EdgeInsets.only(top: 8.0, bottom: 10.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              Text(
+                                '🗓️ Trip Start Date: $tripStartDateText',
+                                style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.indigo.shade700),
+                              ),
+                              const SizedBox(height: 4),
+                              Text(
+                                '🕒 Plan Generated: $formattedNow',
+                                style: const TextStyle(fontSize: 11, color: Colors.grey),
+                              ),
+                              const Divider(height: 20),
+                            ],
+                          ),
+                        ),
+
+                        // Estimated Cost
+                        Text(
+                          '💰 Estimated Total Cost',
+                          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16, color: Colors.green.shade800),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(left: 14, top: 5, bottom: 10),
+                          child: Text(
+                            _generatedPlan!['estimatedTotalCost'] as String? ?? 'Cost estimate unavailable.',
+                            style: const TextStyle(fontSize: 16, fontWeight: FontWeight.bold),
+                          ),
+                        ),
+                        const Divider(height: 20),
+
+                        // Itinerary Summary
+                        const Text(
+                          '📝 Itinerary Summary',
+                          style: TextStyle(fontWeight: FontWeight.w600, fontSize: 16),
+                        ),
+                        Padding(
+                          padding: const EdgeInsets.only(left: 14, top: 10),
+                          child: Text(
+                            _generatedPlan!['itinerarySummary'] as String? ?? 'Summary unavailable.',
+                          ),
+                        ),
+                        
+                        // Route Stops (Section 1)
+                        _buildPlanSection(
+                          '📍 Main Route Stops (for Weather Check)', 
+                          _generatedPlan!['routeStops'] as List<dynamic>? ?? [], 
+                          isRoute: true,
+                        ),
+
+                        // Tourist Stops (Section 2)
+                        _buildPlanSection(
+                          '📸 Recommended Tourist Stops', 
+                          _generatedPlan!['touristStops'] as List<dynamic>? ?? [],
+                        ),
+
+                        // Hotel Recommendations (Section 3)
+                        _buildPlanSection(
+                          '🏨 Hotel Recommendations', 
+                          _generatedPlan!['hotelRecommendations'] as List<dynamic>? ?? [],
+                        ),
+
+                        // Fuel/Stop Recommendations (Section 4)
+                        _buildPlanSection(
+                          '⛽ Fuel/EV Stop Recommendations', 
+                          _generatedPlan!['stopRecommendations'] as List<dynamic>? ?? [],
+                        ),
+                        
+                        // Smart Advisor Tips (Section 5)
+                        _buildPlanSection(
+                          '💡 Smart Advisor Tips', 
+                          _generatedPlan!['smartAdvisorTips'] as List<dynamic>? ?? [],
+                        ),
+                      ],
+                    ),
+                  ),
             
               // --- Save Plan Button (NEW POSITION) ---
               if (_showPlan)
