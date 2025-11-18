@@ -1,8 +1,8 @@
-// plans_history_screen.dart
-import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 import 'dart:convert';
-import 'package:url_launcher/url_launcher.dart'; 
+
+import 'package:flutter/material.dart';
+import 'package:intl/intl.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 class PlansHistoryScreen extends StatefulWidget {
   const PlansHistoryScreen({Key? key}) : super(key: key);
@@ -13,291 +13,102 @@ class PlansHistoryScreen extends StatefulWidget {
 
 class _PlansHistoryScreenState extends State<PlansHistoryScreen> {
   List<Map<String, dynamic>> _savedPlans = [];
+  List<bool> _expanded = [];
   bool _isLoading = true;
 
   @override
   void initState() {
     super.initState();
-    _loadPlans();
+    _loadSavedPlans();
   }
 
-  Future<void> _loadPlans() async {
-    final prefs = await SharedPreferences.getInstance();
-    final List<String> savedPlansJson = prefs.getStringList('savedTripPlans') ?? [];
-    
-    List<Map<String, dynamic>> loadedPlans = [];
-    
-    // Reverse for newest first display
-    for (var jsonString in savedPlansJson.reversed) { 
-      try {
-        final Map<String, dynamic> planMap = jsonDecode(jsonString) as Map<String, dynamic>;
-        loadedPlans.add(planMap);
-      } catch (e) {
-        print('Error decoding plan JSON: $e');
-      }
-    }
+  Future<void> _loadSavedPlans() async {
+    setState(() => _isLoading = true);
 
-    setState(() {
-      _savedPlans = loadedPlans;
-      _isLoading = false;
-    });
-  }
-  
-  // NEW: Function to delete a plan
-  Future<void> _deletePlan(int index) async {
-    final prefs = await SharedPreferences.getInstance();
-    final List<String> savedPlansJson = prefs.getStringList('savedTripPlans') ?? [];
-    
-    // The item at `index` in `_savedPlans` (the reversed list) corresponds to 
-    // `savedPlansJson.length - 1 - index` in the original saved list.
-    final int originalIndex = savedPlansJson.length - 1 - index; 
+    try {
+      final prefs = await SharedPreferences.getInstance();
+      final List<String> rawList =
+          prefs.getStringList('savedTripPlans') ?? [];
 
-    if (originalIndex >= 0 && originalIndex < savedPlansJson.length) {
-      savedPlansJson.removeAt(originalIndex);
-      await prefs.setStringList('savedTripPlans', savedPlansJson);
-      
+      final List<Map<String, dynamic>> decoded = rawList.map((p) {
+        try {
+          return jsonDecode(p) as Map<String, dynamic>;
+        } catch (_) {
+          return <String, dynamic>{};
+        }
+      }).where((e) => e.isNotEmpty).toList();
+
       setState(() {
-        _savedPlans.removeAt(index);
+        _savedPlans = decoded.reversed.toList(); // latest first
+        _expanded = List<bool>.filled(_savedPlans.length, false);
+        _isLoading = false;
       });
+    } catch (e) {
+      setState(() => _isLoading = false);
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Trip plan deleted successfully.")),
+        SnackBar(content: Text('Error loading saved plans: $e')),
       );
     }
   }
 
-  // NEW: Confirmation Dialog for Delete
-  void _confirmDeletePlan(int index) {
-    showDialog(
+  String _formatDateTime(String? iso) {
+    if (iso == null || iso.isEmpty) return 'Unknown';
+    try {
+      final dt = DateTime.parse(iso);
+      return DateFormat('EEE, MMM d, yyyy – hh:mm a').format(dt);
+    } catch (_) {
+      return iso;
+    }
+  }
+
+  String _formatPlannedDate(String? iso) {
+    if (iso == null || iso.isEmpty) return 'Not provided';
+    try {
+      final dt = DateTime.parse(iso);
+      return DateFormat('EEE, MMM d, yyyy').format(dt);
+    } catch (_) {
+      return iso;
+    }
+  }
+
+  Future<void> _confirmDelete(int index) async {
+    final bool? ok = await showDialog<bool>(
       context: context,
-      builder: (BuildContext context) {
-        return AlertDialog(
-          title: const Text("Confirm Delete"),
-          content: const Text("Are you sure you want to permanently delete this trip plan?"),
-          actions: <Widget>[
-            TextButton(
-              child: const Text("Cancel"),
-              onPressed: () => Navigator.of(context).pop(),
-            ),
-            TextButton(
-              child: const Text("Delete", style: TextStyle(color: Colors.red)),
-              onPressed: () {
-                Navigator.of(context).pop();
-                _deletePlan(index);
-              },
-            ),
-          ],
-        );
-      },
-    );
-  }
-  
-  // --- HELPER METHODS FOR DETAIL VIEW ---
-
-  String _ratingToStars(String? rating) {
-    if (rating == null || rating.isEmpty || rating.toLowerCase() == 'n/a' || rating.toLowerCase() == 'n/a/5') {
-      return '';
-    }
-
-    RegExp exp = RegExp(r'(\d+\.?\d*)');
-    String? numStr = exp.firstMatch(rating)?.group(1);
-
-    if (numStr == null) {
-      return '($rating)'; 
-    }
-    
-    double? value = double.tryParse(numStr);
-    if (value == null || value < 0.1) {
-        return '($rating)'; 
-    }
-    
-    if (value > 5 && value <= 10) {
-        value = value / 2.0;
-    } else if (value > 5) {
-        return '($rating)'; 
-    }
-
-    double roundedValue = (value * 2).round() / 2;
-    roundedValue = roundedValue > 5.0 ? 5.0 : roundedValue;
-
-    int fullStars = roundedValue.floor();
-    bool halfStar = (roundedValue - fullStars) >= 0.5;
-    
-    String stars = '⭐' * fullStars;
-
-    if (halfStar) {
-      stars += '½'; 
-    }
-    
-    if (stars.isEmpty) {
-        return '($rating)';
-    }
-
-    return stars;
-  }
-  
-  Future<void> _openMap(BuildContext context, String query) async {
-    final String encodedQuery = Uri.encodeComponent(query);
-    // Use the correct Google Maps URL format for mobile
-    final Uri url = Uri.parse('https://www.google.com/maps/search/?api=1&query=$encodedQuery'); 
-
-    // The user's code previously had an incorrect URL. This is the correct one.
-    if (await canLaunchUrl(url)) {
-      await launchUrl(url, mode: LaunchMode.externalApplication);
-    } else {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not open map for: $query')),
-      );
-    }
-  }
-  
-  Widget _buildPlanSection(BuildContext context, String title, List<dynamic> items, {bool isRoute = false}) {
-    if (items.isEmpty) return const SizedBox.shrink();
-
-    return Container(
-      padding: const EdgeInsets.only(top: 10, bottom: 5, left: 10),
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          Padding(
-            padding: const EdgeInsets.only(top: 10.0, bottom: 5.0),
-            child: Text(title,
-                style: const TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: Colors.indigo)),
+      builder: (ctx) => AlertDialog(
+        title: const Text('Delete this plan?'),
+        content: const Text(
+          'This will permanently remove the saved plan from history.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(false),
+            child: const Text('Cancel'),
           ),
-          ...items.map((item) {
-            String name;
-            String? mapQuery;
-            String? type;
-
-            if (isRoute) {
-              name = item as String;
-              final index = items.indexOf(item);
-              final isLast = index == items.length - 1;
-              return Padding(
-                padding: const EdgeInsets.symmetric(vertical: 4.0),
-                child: Text(isLast ? "📍 $name" : "📍 $name →", style: const TextStyle(fontSize: 14)),
-              );
-            } else {
-              final itemMap = item as Map<String, dynamic>;
-              name = itemMap['name'] as String;
-              final rating = itemMap['rating'] as String?; 
-              mapQuery = itemMap['mapSearchQuery'] as String?;
-              type = itemMap['type'] as String?;
-              
-              String displayTitle = name;
-              if (type != null && type.isNotEmpty) {
-                  displayTitle = '$name (${type})';
-              }
-
-              String starString = _ratingToStars(rating);
-              if (starString.isNotEmpty) {
-                  displayTitle = '$displayTitle - $starString';
-              }
-              else if (rating != null && rating.isNotEmpty && rating.toLowerCase() != 'n/a') {
-                  displayTitle = '$displayTitle - ($rating)';
-              }
-
-              if (mapQuery != null && mapQuery.isNotEmpty) {
-                return GestureDetector(
-                  onTap: () => _openMap(context, mapQuery!), 
-                  child: Padding(
-                    padding: const EdgeInsets.symmetric(vertical: 4.0),
-                    child: Text(
-                      "• $displayTitle",
-                      style: TextStyle(
-                          color: Colors.indigo.shade700,
-                          fontSize: 14,
-                          decoration: TextDecoration.underline),
-                    ),
-                  ), 
-                ); 
-              } else {
-                return Padding(
-                  padding: const EdgeInsets.symmetric(vertical: 4.0),
-                  child: Text("• $displayTitle", style: const TextStyle(fontSize: 14)),
-                );
-              }
-            }
-          }).toList(),
-          const SizedBox(height: 5),
-        ],
-      ),
-    );
-  }
-
-  // --- _buildPlanCard uses ExpansionTile ---
-  Widget _buildPlanCard(Map<String, dynamic> plan, int index) {
-    final String summary = plan['itinerarySummary'] as String? ?? 'No summary available.';
-    final List<dynamic> routeStops = plan['routeStops'] as List<dynamic>? ?? [];
-    final List<dynamic> touristStops = plan['touristStops'] as List<dynamic>? ?? [];
-    final List<dynamic> hotelRecommendations = plan['hotelRecommendations'] as List<dynamic>? ?? [];
-    final List<dynamic> stopRecommendations = plan['stopRecommendations'] as List<dynamic>? ?? []; 
-    final String safetyTip = plan['safeRouteTip'] as String? ?? 'No safety tip provided.';
-    
-    String tripRoute = 'N/A';
-    if (routeStops.length >= 2) {
-      tripRoute = '${routeStops.first} to ${routeStops.last}';
-    }
-
-    final displayIndex = _savedPlans.length - index; 
-
-    return Card(
-      margin: const EdgeInsets.only(bottom: 16),
-      elevation: 4,
-      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
-      child: ExpansionTile(
-        tilePadding: const EdgeInsets.all(20),
-        title: Text(
-          "Trip Plan #$displayIndex",
-          style: const TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: Colors.indigo),
-        ),
-        subtitle: Text(
-          "Route: $tripRoute",
-          style: const TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.black87),
-        ),
-        // UPDATED: Trailing is the Delete Button
-        trailing: IconButton(
-          icon: const Icon(Icons.delete_forever, color: Colors.red),
-          onPressed: () => _confirmDeletePlan(index),
-          tooltip: 'Delete Plan',
-        ),
-        children: <Widget>[
-          Padding(
-            padding: const EdgeInsets.fromLTRB(20, 0, 20, 10),
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                // 1. Summary
-                const Text("Itinerary Summary:", style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: Colors.indigo)),
-                const Divider(color: Colors.indigo, thickness: 1.5),
-                Text(summary, style: const TextStyle(fontSize: 14, fontStyle: FontStyle.italic)),
-
-                // 2. Route Stops
-                _buildPlanSection(context, "🚗 Detailed Route Stops:", routeStops, isRoute: true),
-
-                // 3. Tourist Stops
-                _buildPlanSection(context, "📸 Tourist Attractions (Click to Map):", touristStops),
-
-                // 4. Hotel Recommendations
-                _buildPlanSection(context, "🏨 Hotel Recommendations (Click to Map):", hotelRecommendations),
-
-                // 5. Fuel/Rest Stops
-                _buildPlanSection(context, "⛽ Service/Fuel Stops (Click to Map):", stopRecommendations),
-                
-                // 6. Safety Tip
-                const SizedBox(height: 16),
-                const Text("🛡️ Safety Tip:",
-                    style: TextStyle(fontWeight: FontWeight.w700, fontSize: 16, color: Colors.indigo)),
-                const Divider(color: Colors.indigo, thickness: 1.5),
-                Padding(
-                  padding: const EdgeInsets.only(left: 8, top: 4, bottom: 20),
-                  child: Text(safetyTip, style: const TextStyle(fontSize: 14)),
-                ),
-              ],
+          TextButton(
+            onPressed: () => Navigator.of(ctx).pop(true),
+            child: const Text(
+              'Delete',
+              style: TextStyle(color: Colors.red),
             ),
           ),
         ],
       ),
     );
+
+    if (ok == true) {
+      final prefs = await SharedPreferences.getInstance();
+      final List<String> rawList =
+          prefs.getStringList('savedTripPlans') ?? [];
+
+      // because we reversed for display
+      final realIndex = rawList.length - 1 - index;
+      if (realIndex >= 0 && realIndex < rawList.length) {
+        rawList.removeAt(realIndex);
+        await prefs.setStringList('savedTripPlans', rawList);
+      }
+
+      await _loadSavedPlans();
+    }
   }
 
   @override
@@ -308,41 +119,462 @@ class _PlansHistoryScreenState extends State<PlansHistoryScreen> {
         backgroundColor: Colors.indigo,
         foregroundColor: Colors.white,
       ),
-      backgroundColor: const Color(0xFFEAF3FF),
       body: _isLoading
-          ? const Center(child: CircularProgressIndicator(color: Colors.indigo))
+          ? const Center(child: CircularProgressIndicator())
           : _savedPlans.isEmpty
-              ? Center(
-                  child: Padding(
-                    padding: const EdgeInsets.all(20.0),
-                    child: Card(
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
-                      elevation: 8,
-                      child: Padding(
-                        padding: const EdgeInsets.all(30.0),
-                        child: Column(
-                          mainAxisSize: MainAxisSize.min,
-                          mainAxisAlignment: MainAxisAlignment.center,
-                          children: const [
-                            Icon(Icons.history_toggle_off, size: 50, color: Colors.indigo),
-                            SizedBox(height: 10),
-                            Text(
-                              'No past plans found. Generate and save a plan first!',
-                              textAlign: TextAlign.center,
-                              style: TextStyle(fontSize: 18, color: Colors.grey),
-                            ),
-                          ],
-                        ),
-                      ),
-                    ),
+              ? const Center(
+                  child: Text(
+                    'No plans saved yet.\nGenerate a trip plan and tap "Save Plan".',
+                    textAlign: TextAlign.center,
                   ),
                 )
               : ListView.builder(
-                  padding: const EdgeInsets.all(20.0),
+                  padding: const EdgeInsets.all(16),
                   itemCount: _savedPlans.length,
                   itemBuilder: (context, index) {
                     final plan = _savedPlans[index];
-                    return _buildPlanCard(plan, index);
+                    final meta =
+                        (plan['meta'] ?? {}) as Map<String, dynamic>;
+
+                    final String from = (meta['from'] ?? '') as String;
+                    final String to = (meta['to'] ?? '') as String;
+                    final int members =
+                        (meta['members'] ?? 0) as int;
+                    final String savedAt =
+                        _formatDateTime(meta['savedAt'] as String?);
+                    final String plannedDate =
+                        _formatPlannedDate(meta['plannedDate'] as String?);
+                    final String tripName =
+                        (meta['tripName'] ?? '') as String? ??
+                            (from.isNotEmpty && to.isNotEmpty
+                                ? '$from → $to'
+                                : 'Trip ${index + 1}');
+
+                    final String estimatedCost =
+                        (plan['estimatedTotalCost'] ?? 'N/A') as String;
+                    final String itinerarySummary =
+                        (plan['itinerarySummary'] ??
+                                'No summary available.')
+                            as String;
+
+                    final List<dynamic> routeStops =
+                        (plan['routeStops'] as List?) ?? [];
+                    final List<dynamic> touristStops =
+                        (plan['touristStops'] as List?) ?? [];
+                    final List<dynamic> hotels =
+                        (plan['hotelRecommendations'] as List?) ?? [];
+                    final List<dynamic> services =
+                        (plan['stopRecommendations'] as List?) ?? [];
+                    final List<dynamic> smartTips =
+                        (plan['smartAdvisorTips'] as List?) ?? [];
+
+                    return Card(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(16),
+                      ),
+                      margin: const EdgeInsets.only(bottom: 12),
+                      elevation: 4,
+                      child: InkWell(
+                        borderRadius: BorderRadius.circular(16),
+                        onLongPress: () => _confirmDelete(index),
+                        child: Padding(
+                          padding: const EdgeInsets.all(14.0),
+                          child: Column(
+                            crossAxisAlignment: CrossAxisAlignment.start,
+                            children: [
+                              // TOP: Trip name + cost
+                              Row(
+                                crossAxisAlignment:
+                                    CrossAxisAlignment.start,
+                                children: [
+                                  Expanded(
+                                    child: Text(
+                                      tripName,
+                                      style: const TextStyle(
+                                        fontSize: 16,
+                                        fontWeight: FontWeight.bold,
+                                      ),
+                                    ),
+                                  ),
+                                  const SizedBox(width: 8),
+                                  if (estimatedCost.isNotEmpty)
+                                    Text(
+                                      estimatedCost,
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.green.shade700,
+                                      ),
+                                      textAlign: TextAlign.right,
+                                    ),
+                                ],
+                              ),
+                              const SizedBox(height: 6),
+
+                              // From → To
+                              if (from.isNotEmpty || to.isNotEmpty)
+                                Text(
+                                  '📍 ${from.isNotEmpty ? from : 'Unknown'} → ${to.isNotEmpty ? to : 'Unknown'}',
+                                  style: const TextStyle(
+                                    fontSize: 13,
+                                    color: Colors.black87,
+                                  ),
+                                ),
+
+                              const SizedBox(height: 4),
+
+                              // Dates + Travellers
+                              Text(
+                                '📅 Saved: $savedAt',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                              Text(
+                                '🗓 Trip Planned Date: $plannedDate',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                              Text(
+                                '👥 Travellers: $members',
+                                style: const TextStyle(
+                                  fontSize: 11,
+                                  color: Colors.grey,
+                                ),
+                              ),
+
+                              const SizedBox(height: 8),
+                              Divider(
+                                height: 16,
+                                color: Colors.grey.shade300,
+                              ),
+
+                              // Expand / Collapse Arrow
+                              Center(
+                                child: IconButton(
+                                  icon: AnimatedRotation(
+                                    duration: const Duration(
+                                        milliseconds: 200),
+                                    turns:
+                                        _expanded[index] ? 0.5 : 0.0,
+                                    child: const Icon(
+                                      Icons.keyboard_arrow_down,
+                                      size: 28,
+                                    ),
+                                  ),
+                                  onPressed: () {
+                                    setState(() {
+                                      _expanded[index] =
+                                          !_expanded[index];
+                                    });
+                                  },
+                                ),
+                              ),
+
+                              // Expanded content
+                              AnimatedCrossFade(
+                                duration: const Duration(
+                                    milliseconds: 250),
+                                crossFadeState: _expanded[index]
+                                    ? CrossFadeState.showSecond
+                                    : CrossFadeState.showFirst,
+                                firstChild:
+                                    const SizedBox.shrink(),
+                                secondChild: Column(
+                                  crossAxisAlignment:
+                                      CrossAxisAlignment.start,
+                                  children: [
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      '📝 Itinerary Summary:',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.indigo.shade700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    Text(
+                                      itinerarySummary,
+                                      style: const TextStyle(
+                                        fontSize: 13,
+                                      ),
+                                    ),
+
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      '🚗 Route:',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.indigo.shade700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    if (routeStops.isEmpty)
+                                      const Text(
+                                        'No route information available.',
+                                        style:
+                                            TextStyle(fontSize: 13),
+                                      )
+                                    else
+                                      Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: routeStops
+                                            .whereType<String>()
+                                            .map((name) {
+                                          final idx = routeStops
+                                              .whereType<String>()
+                                              .toList()
+                                              .indexOf(name);
+                                          final isLast = idx ==
+                                              routeStops
+                                                      .whereType<
+                                                          String>()
+                                                      .length -
+                                                  1;
+                                          return Padding(
+                                            padding:
+                                                const EdgeInsets
+                                                        .only(
+                                                    bottom: 2),
+                                            child: Text(
+                                              isLast
+                                                  ? '• $name'
+                                                  : '• $name →',
+                                              style:
+                                                  const TextStyle(
+                                                fontSize: 13,
+                                              ),
+                                            ),
+                                          );
+                                        }).toList(),
+                                      ),
+
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      '📸 Tourist Stops:',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.indigo.shade700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    if (touristStops.isEmpty)
+                                      const Text(
+                                        'No tourist stops available.',
+                                        style:
+                                            TextStyle(fontSize: 13),
+                                      )
+                                    else
+                                      Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: touristStops
+                                            .map((raw) {
+                                          final m = raw
+                                              as Map<String, dynamic>;
+                                          final name =
+                                              (m['name'] ?? '')
+                                                  as String;
+                                          if (name.isEmpty) {
+                                            return const SizedBox
+                                                .shrink();
+                                          }
+                                          return Padding(
+                                            padding:
+                                                const EdgeInsets
+                                                        .only(
+                                                    bottom: 2),
+                                            child: Text(
+                                              '• $name',
+                                              style:
+                                                  const TextStyle(
+                                                fontSize: 13,
+                                              ),
+                                            ),
+                                          );
+                                        }).toList(),
+                                      ),
+
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      '🏨 Hotel Recommendations:',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.indigo.shade700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    if (hotels.isEmpty)
+                                      const Text(
+                                        'No hotel recommendations available.',
+                                        style:
+                                            TextStyle(fontSize: 13),
+                                      )
+                                    else
+                                      Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: hotels.map((raw) {
+                                          final m = raw
+                                              as Map<String, dynamic>;
+                                          final name =
+                                              (m['name'] ?? '')
+                                                  as String;
+                                          if (name.isEmpty) {
+                                            return const SizedBox
+                                                .shrink();
+                                          }
+                                          return Padding(
+                                            padding:
+                                                const EdgeInsets
+                                                        .only(
+                                                    bottom: 2),
+                                            child: Text(
+                                              '• $name',
+                                              style:
+                                                  const TextStyle(
+                                                fontSize: 13,
+                                              ),
+                                            ),
+                                          );
+                                        }).toList(),
+                                      ),
+
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      '⛽ Service Stops:',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.indigo.shade700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    if (services.isEmpty)
+                                      const Text(
+                                        'No service stops available.',
+                                        style:
+                                            TextStyle(fontSize: 13),
+                                      )
+                                    else
+                                      Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: services.map((raw) {
+                                          final m = raw
+                                              as Map<String, dynamic>;
+                                          final name =
+                                              (m['name'] ?? '')
+                                                  as String;
+                                          if (name.isEmpty) {
+                                            return const SizedBox
+                                                .shrink();
+                                          }
+                                          return Padding(
+                                            padding:
+                                                const EdgeInsets
+                                                        .only(
+                                                    bottom: 2),
+                                            child: Text(
+                                              '• $name',
+                                              style:
+                                                  const TextStyle(
+                                                fontSize: 13,
+                                              ),
+                                            ),
+                                          );
+                                        }).toList(),
+                                      ),
+
+                                    const SizedBox(height: 10),
+                                    Text(
+                                      '💡 Smart Advisor Tips:',
+                                      style: TextStyle(
+                                        fontSize: 13,
+                                        fontWeight: FontWeight.w600,
+                                        color: Colors.indigo.shade700,
+                                      ),
+                                    ),
+                                    const SizedBox(height: 4),
+                                    if (smartTips.isEmpty)
+                                      const Text(
+                                        'No specific suggestions generated.',
+                                        style:
+                                            TextStyle(fontSize: 13),
+                                      )
+                                    else
+                                      Column(
+                                        crossAxisAlignment:
+                                            CrossAxisAlignment.start,
+                                        children: smartTips.map((raw) {
+                                          final m = raw
+                                              as Map<String, dynamic>;
+                                          final heading =
+                                              (m['heading'] ??
+                                                      'Tip')
+                                                  as String;
+                                          final tip = (m['tip'] ??
+                                                  'No detail provided.')
+                                              as String;
+                                          return Padding(
+                                            padding:
+                                                const EdgeInsets
+                                                        .only(
+                                                    bottom: 8),
+                                            child: Column(
+                                              crossAxisAlignment:
+                                                  CrossAxisAlignment
+                                                      .start,
+                                              children: [
+                                                Text(
+                                                  '• $heading',
+                                                  style:
+                                                      const TextStyle(
+                                                    fontSize: 13,
+                                                    fontWeight:
+                                                        FontWeight
+                                                            .w600,
+                                                  ),
+                                                ),
+                                                const SizedBox(
+                                                    height: 2),
+                                                Text(
+                                                  tip,
+                                                  style:
+                                                      const TextStyle(
+                                                    fontSize: 13,
+                                                  ),
+                                                ),
+                                              ],
+                                            ),
+                                          );
+                                        }).toList(),
+                                      ),
+                                  ],
+                                ),
+                              ),
+
+                              const SizedBox(height: 6),
+                              const Text(
+                                'Long-press to delete this plan.',
+                                style: TextStyle(
+                                  fontSize: 10,
+                                  color: Colors.grey,
+                                ),
+                              ),
+                            ],
+                          ),
+                        ),
+                      ),
+                    );
                   },
                 ),
     );

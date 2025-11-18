@@ -1,9 +1,9 @@
 // main.dart
 import 'package:flutter/material.dart';
 import 'dart:convert'; // Import for JSON handling
-import 'package:url_launcher/url_launcher.dart'; 
+import 'package:url_launcher/url_launcher.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
-import 'package:shared_preferences/shared_preferences.dart'; 
+import 'package:shared_preferences/shared_preferences.dart';
 import 'package:intl/intl.dart'; // For date formatting and current time
 
 // NEW IMPORTS for Firebase Auth and Login Screen
@@ -12,22 +12,22 @@ import 'package:firebase_auth/firebase_auth.dart';
 import 'login_screen.dart'; // Ensure you have created this file
 
 // NEW IMPORTS for Location Services (as requested)
-import 'package:geolocator/geolocator.dart'; 
-import 'package:geocoding/geocoding.dart'; 
+import 'package:geolocator/geolocator.dart';
+import 'package:geocoding/geocoding.dart';
 
 import 'weather_screen.dart';
-import 'expense_tab.dart'; 
-import 'plans_history_screen.dart'; 
-import 'expenses_history_screen.dart'; 
+import 'expense_tab.dart';
+import 'plans_history_screen.dart';
+import 'expenses_history_screen.dart';
 
-// --- NEW: Initialize Firebase in main() ---
+// 🔹 NEW: Import for Trip Suggestions screen
+import 'trip_suggestions_screen.dart';
+
+// --- Initialize Firebase in main() ---
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   try {
-    // !!! IMPORTANT: You must configure Firebase for your platform
-    // You might need to replace this with your actual Firebase options, e.g.,
-    // await Firebase.initializeApp(options: DefaultFirebaseOptions.currentPlatform); 
-    await Firebase.initializeApp(); 
+    await Firebase.initializeApp();
   } catch (e) {
     print('Error initializing Firebase: $e');
   }
@@ -44,41 +44,40 @@ class MyApp extends StatelessWidget {
       theme: ThemeData(
         primarySwatch: Colors.indigo,
         useMaterial3: true,
-      ), 
-      // --- NEW: Start with the AuthWrapper to check login state ---
+      ),
       home: const AuthWrapper(),
       debugShowCheckedModeBanner: false,
     );
   }
 }
 
-// --- NEW WIDGET: AuthWrapper to handle routing based on login status ---
+// --- AuthWrapper to handle routing based on login status ---
 class AuthWrapper extends StatelessWidget {
   const AuthWrapper({super.key});
 
   @override
   Widget build(BuildContext context) {
-    // StreamBuilder listens to the user's authentication state
     return StreamBuilder<User?>(
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
-        // Show a loading indicator while checking the auth state
+        // Loading while checking auth
         if (snapshot.connectionState == ConnectionState.waiting) {
-          return const Scaffold(body: Center(child: CircularProgressIndicator()));
-        }
-        
-        // If the user is logged in (User object is not null)
-        if (snapshot.hasData && snapshot.data != null) {
-          return const HomeScreen(); // Navigate to the main app screen
+          return const Scaffold(
+            body: Center(child: CircularProgressIndicator()),
+          );
         }
 
-        // Otherwise, show the Login screen
+        // Logged in
+        if (snapshot.hasData && snapshot.data != null) {
+          return const HomeScreen();
+        }
+
+        // Not logged in
         return const LoginScreen();
       },
     );
   }
 }
-// --------------------------------------------------------------------------
 
 class HomeScreen extends StatefulWidget {
   const HomeScreen({super.key});
@@ -88,9 +87,8 @@ class HomeScreen extends StatefulWidget {
 }
 
 class _HomeScreenState extends State<HomeScreen> {
-  List<String> routeStops = []; // shared with Weather tab
-  
-  // --- NEW: Logout Function ---
+  List<String> routeStops = [];
+
   Future<void> _logout() async {
     try {
       await FirebaseAuth.instance.signOut();
@@ -100,9 +98,7 @@ class _HomeScreenState extends State<HomeScreen> {
       );
     }
   }
-  // ---------------------------
 
-  // --- Navigation Helpers ---
   void _navigateToTab(int index, BuildContext context) {
     Navigator.of(context).pop(); // Close the drawer
     final TabController? controller = DefaultTabController.of(context);
@@ -112,7 +108,7 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _navigateToPlansHistory() {
-    Navigator.of(context).pop(); // Close the drawer first
+    Navigator.of(context).pop();
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => const PlansHistoryScreen(),
@@ -121,14 +117,14 @@ class _HomeScreenState extends State<HomeScreen> {
   }
 
   void _navigateToExpensesHistory() {
-    Navigator.of(context).pop(); // Close the drawer first
+    Navigator.of(context).pop();
     Navigator.of(context).push(
       MaterialPageRoute(
         builder: (context) => const ExpensesHistoryScreen(),
       ),
     );
   }
-  
+
   void _showAboutDialog() {
     showAboutDialog(
       context: context,
@@ -138,7 +134,9 @@ class _HomeScreenState extends State<HomeScreen> {
       children: const <Widget>[
         Padding(
           padding: EdgeInsets.only(top: 15),
-          child: Text('Your intelligent companion for trip planning, weather checks, and expense tracking.'),
+          child: Text(
+            'Your intelligent companion for trip planning, weather checks, and expense tracking.',
+          ),
         ),
       ],
     );
@@ -146,7 +144,6 @@ class _HomeScreenState extends State<HomeScreen> {
 
   @override
   Widget build(BuildContext context) {
-    // Get the current user's email if logged in
     final User? user = FirebaseAuth.instance.currentUser;
     final String userEmail = user?.email ?? 'user.name@example.com';
 
@@ -167,6 +164,20 @@ class _HomeScreenState extends State<HomeScreen> {
             ),
           ),
           iconTheme: const IconThemeData(color: Colors.indigo),
+          actions: [
+            IconButton(
+              icon: const Icon(Icons.tips_and_updates_outlined),
+              tooltip: 'Trip suggestions',
+              onPressed: () {
+                Navigator.push(
+                  context,
+                  MaterialPageRoute(
+                    builder: (_) => const TripSuggestionsScreen(),
+                  ),
+                );
+              },
+            ),
+          ],
           bottom: const TabBar(
             labelColor: Colors.indigo,
             unselectedLabelColor: Colors.grey,
@@ -178,51 +189,67 @@ class _HomeScreenState extends State<HomeScreen> {
             ],
           ),
         ),
-        
-        // --- INDIGO-THEMED DRAWER ---
         drawer: Drawer(
-          backgroundColor: Colors.white, 
+          backgroundColor: Colors.white,
           child: ListView(
             padding: EdgeInsets.zero,
             children: <Widget>[
-              // Drawer Header
               UserAccountsDrawerHeader(
                 accountName: const Text(
                   'Welcome, Traveler!',
-                  style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.white),
+                  style: TextStyle(
+                    fontWeight: FontWeight.bold,
+                    fontSize: 18,
+                    color: Colors.white,
+                  ),
                 ),
-                accountEmail: Text(userEmail, style: const TextStyle(color: Colors.white70)),
+                accountEmail: Text(
+                  userEmail,
+                  style: const TextStyle(color: Colors.white70),
+                ),
                 currentAccountPicture: const CircleAvatar(
                   backgroundColor: Colors.white,
-                  child: Icon(Icons.account_circle, size: 50, color: Colors.indigo),
+                  child: Icon(
+                    Icons.account_circle,
+                    size: 50,
+                    color: Colors.indigo,
+                  ),
                 ),
                 decoration: const BoxDecoration(
-                  color: Colors.indigo, // Primary color theme
+                  color: Colors.indigo,
                 ),
               ),
-              
-              // Navigation ListTiles (to tabs)
               ListTile(
                 leading: const Icon(Icons.map, color: Colors.indigo),
-                title: const Text('Plan Trip', style: TextStyle(color: Colors.indigo)),
+                title: const Text(
+                  'Plan Trip',
+                  style: TextStyle(color: Colors.indigo),
+                ),
                 onTap: () => _navigateToTab(0, context),
               ),
               ListTile(
                 leading: const Icon(Icons.cloud, color: Colors.indigo),
-                title: const Text('Current Weather', style: TextStyle(color: Colors.indigo)),
+                title: const Text(
+                  'Current Weather',
+                  style: TextStyle(color: Colors.indigo),
+                ),
                 onTap: () => _navigateToTab(1, context),
               ),
               ListTile(
                 leading: const Icon(Icons.monetization_on, color: Colors.indigo),
-                title: const Text('Track Expenses', style: TextStyle(color: Colors.indigo)),
+                title: const Text(
+                  'Track Expenses',
+                  style: TextStyle(color: Colors.indigo),
+                ),
                 onTap: () => _navigateToTab(2, context),
               ),
               const Divider(),
-              
-              // History Expansion Tile (COLOR CHANGED TO INDIGO)
               ExpansionTile(
-                leading: const Icon(Icons.history, color: Colors.indigo), 
-                title: const Text('History', style: TextStyle(color: Colors.indigo)),
+                leading: const Icon(Icons.history, color: Colors.indigo),
+                title: const Text(
+                  'History',
+                  style: TextStyle(color: Colors.indigo),
+                ),
                 children: <Widget>[
                   ListTile(
                     title: const Padding(
@@ -243,43 +270,40 @@ class _HomeScreenState extends State<HomeScreen> {
                 ],
               ),
               const Divider(),
-
-              // Settings
               ListTile(
                 leading: const Icon(Icons.settings, color: Colors.grey),
                 title: const Text('Settings'),
                 onTap: () {
                   Navigator.of(context).pop();
                   ScaffoldMessenger.of(context).showSnackBar(
-                    const SnackBar(content: Text("Settings page coming soon!")),
+                    const SnackBar(
+                      content: Text("Settings page coming soon!"),
+                    ),
                   );
                 },
               ),
-              
-              // About App
               ListTile(
                 leading: const Icon(Icons.info_outline, color: Colors.grey),
                 title: const Text('About App'),
                 onTap: () {
-                  Navigator.of(context).pop(); 
+                  Navigator.of(context).pop();
                   _showAboutDialog();
                 },
               ),
-
-              // LOGOUT OPTION
               ListTile(
-                leading: const Icon(Icons.logout, color: Colors.red), // Use red for logout
-                title: const Text('Logout', style: TextStyle(color: Colors.red)), 
+                leading: const Icon(Icons.logout, color: Colors.red),
+                title: const Text(
+                  'Logout',
+                  style: TextStyle(color: Colors.red),
+                ),
                 onTap: () {
-                  Navigator.of(context).pop(); // Close the drawer first
-                  _logout(); // Call the Firebase logout function
+                  Navigator.of(context).pop();
+                  _logout();
                 },
               ),
             ],
           ),
         ),
-        // --- END OF DRAWER ---
-
         body: TabBarView(
           children: [
             PlanTab(
@@ -297,8 +321,6 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 }
-
-// PlanTab Implementation (REST OF YOUR CODE REMAINS UNCHANGED)
 class PlanTab extends StatefulWidget {
   final Function(List<String>) onRouteUpdate; // callback to send routeStops to HomeScreen
   const PlanTab({Key? key, required this.onRouteUpdate}) : super(key: key);
@@ -313,149 +335,35 @@ class _PlanTabState extends State<PlanTab> {
   final TextEditingController toController = TextEditingController();
   final TextEditingController daysController = TextEditingController();
   final TextEditingController travellersController = TextEditingController();
-  
-  // NEW: FocusNode for 'From' TextField to track focus state
+
+  // FocusNode for 'From' TextField to track focus state
   final FocusNode _fromFocusNode = FocusNode();
 
-  // UPDATED: BUDGET SLIDER NEW STATE (Range 0.0 to 11.0)
+  // Budget slider
   double _budgetSliderValue = 5.0; // Default to mid-range
-  // Use this as the primary controller for display, initialized with the default slider value
-  // We use a helper function to determine the display text
-  final TextEditingController budgetController = TextEditingController(text: 'Mid Budget'); 
+  final TextEditingController budgetController =
+      TextEditingController(text: 'Mid Budget');
 
   String? selectedVehicle;
-  
-  // New state variables for AI integration
+
+  // AI integration
   bool _isLoading = false;
   Map<String, dynamic>? _generatedPlan;
-  bool get _showPlan => _generatedPlan != null; // Use a getter based on the plan data
+  bool get _showPlan => _generatedPlan != null;
 
   final ScrollController _scrollController = ScrollController();
-  
-  // State for location button visibility
-  bool _isLocating = false; // To show a loading indicator on the location button
 
-  // --- Date State Variables and Logic ---
-  DateTime? _startDate; 
-  String _startDateString = 'Select Start Date'; 
+  // Location button visibility/loading
+  bool _isLocating = false;
 
-  // Helper to convert the 0-11 slider value into a qualitative budget string
-  String _getBudgetLevel(double value) {
-    if (value >= 8) {
-      return 'High Budget';
-    } else if (value >= 4) {
-      return 'Mid Budget';
-    } else {
-      return 'Low Budget';
-    }
-  }
+  // Date state
+  DateTime? _startDate;
+  String _startDateString = 'Select Start Date';
 
-  // Function to show the date picker dialog
-  Future<void> _selectDate(BuildContext context) async {
-    final DateTime? picked = await showDatePicker(
-      context: context,
-      initialDate: _startDate ?? DateTime.now(),
-      firstDate: DateTime.now(), // Cannot select a date before today
-      lastDate: DateTime(2030), // Limit to 2030 for now
-    );
-    if (picked != null && picked != _startDate) {
-      setState(() {
-        _startDate = picked;
-        // Format the date for display
-        _startDateString = DateFormat('EEE, MMM d, yyyy').format(picked);
-      });
-    }
-  }
+  // GEMINI API CONSTANTS
+  final String _apiKey = 'AIzaSyC2gkLJ-pDwn4LMH9E3zRRgCj9GKu0AwR4'; // Your API key
 
-  // Helper to determine if a date is a weekend/weekday
-  String _getDayType(DateTime date) {
-    // DateTime.saturday is 6, DateTime.sunday is 7
-    if (date.weekday == DateTime.saturday || date.weekday == DateTime.sunday) {
-      return 'Weekend';
-    }
-    return 'Weekday';
-  }
-  // --- END Date State Variables and Logic ---
-
-  // --- NEW: Location Functions Implementation ---
-  
-  @override
-  void initState() {
-    super.initState();
-    // Listener to rebuild the widget when the 'From' field changes (for button visibility)
-    fromController.addListener(_onFromChanged);
-    // Listener to rebuild the widget when the focus of the 'From' field changes
-    _fromFocusNode.addListener(_onFocusChanged);
-  }
-
-  void _onFromChanged() {
-    // We call setState to potentially show/hide the location button
-    setState(() {});
-  }
-  
-  void _onFocusChanged() {
-    // We call setState to potentially show/hide the location button
-    setState(() {});
-  }
-
-  // Function to get current location and update the 'From' field
-  Future<void> _getCurrentLocation() async {
-    setState(() {
-      _isLocating = true;
-    });
-
-    try {
-      // 1. Check/Request Permission
-      LocationPermission permission = await Geolocator.checkPermission();
-      if (permission == LocationPermission.denied) {
-        permission = await Geolocator.requestPermission();
-        if (permission == LocationPermission.denied || permission == LocationPermission.deniedForever) {
-          throw Exception('Location permissions are denied. Please enable them in settings.');
-        }
-      }
-
-      // 2. Get Position
-      Position position = await Geolocator.getCurrentPosition(
-        desiredAccuracy: LocationAccuracy.high
-      );
-
-      // 3. Reverse Geocode (Convert Lat/Long to Address)
-      List<Placemark> placemarks = await placemarkFromCoordinates(position.latitude, position.longitude);
-      
-      String address = 'Unknown Location';
-      if (placemarks.isNotEmpty) {
-        final Placemark place = placemarks.first;
-        // Construct a clean, human-readable address: City, State/Region, Country
-        address = [place.locality, place.administrativeArea, place.country]
-            .where((element) => element != null && element.isNotEmpty)
-            .join(', ');
-      }
-
-      // 4. Update TextField
-      fromController.text = address;
-      
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Location set to: $address')),
-      );
-
-    } catch (e) {
-      // Handle any errors (permissions, service disabled, geocoding failure)
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Error getting location: ${e.toString()}')),
-      );
-    } finally {
-      setState(() {
-        _isLocating = false;
-      });
-    }
-  }
-  // --- END Location Functions Implementation ---
-
-
-  // --- GEMINI API CONSTANTS AND IMPLEMENTATION ---
-  final String _apiKey = 'AIzaSyC2gkLJ-pDwn4LMH9E3zRRgCj9GKu0AwR4'; // User provided API key
-
-  // UPDATED: JSON schema for structured output to include estimatedTotalCost
+  // JSON schema template
   final String _jsonSchemaTemplate = r'''
 {
   "estimatedTotalCost": "A single string containing the estimated total cost for the trip in INR, e.g., '₹35,000 - ₹40,000' or 'INR 50,000 (Low Estimate)'.", 
@@ -491,48 +399,149 @@ class _PlanTabState extends State<PlanTab> {
 }
 ''';
 
-  // --- Gemini API Call Implementation ---
+  @override
+  void initState() {
+    super.initState();
+    fromController.addListener(_onFromChanged);
+    _fromFocusNode.addListener(_onFocusChanged);
+  }
+
+  void _onFromChanged() {
+    setState(() {});
+  }
+
+  void _onFocusChanged() {
+    setState(() {});
+  }
+
+  // Convert slider value to text
+  String _getBudgetLevel(double value) {
+    if (value >= 8) {
+      return 'High Budget';
+    } else if (value >= 4) {
+      return 'Mid Budget';
+    } else {
+      return 'Low Budget';
+    }
+  }
+
+  // Date picker
+  Future<void> _selectDate(BuildContext context) async {
+    final DateTime? picked = await showDatePicker(
+      context: context,
+      initialDate: _startDate ?? DateTime.now(),
+      firstDate: DateTime.now(),
+      lastDate: DateTime(2030),
+    );
+    if (picked != null && picked != _startDate) {
+      setState(() {
+        _startDate = picked;
+        _startDateString = DateFormat('EEE, MMM d, yyyy').format(picked);
+      });
+    }
+  }
+
+  String _getDayType(DateTime date) {
+    if (date.weekday == DateTime.saturday || date.weekday == DateTime.sunday) {
+      return 'Weekend';
+    }
+    return 'Weekday';
+  }
+
+  // Get current location and update 'From'
+  Future<void> _getCurrentLocation() async {
+    setState(() {
+      _isLocating = true;
+    });
+
+    try {
+      // 1. Check/Request Permission
+      LocationPermission permission = await Geolocator.checkPermission();
+      if (permission == LocationPermission.denied) {
+        permission = await Geolocator.requestPermission();
+        if (permission == LocationPermission.denied ||
+            permission == LocationPermission.deniedForever) {
+          throw Exception(
+            'Location permissions are denied. Please enable them in settings.',
+          );
+        }
+      }
+
+      // 2. Get Position
+      Position position = await Geolocator.getCurrentPosition(
+        desiredAccuracy: LocationAccuracy.high,
+      );
+
+      // 3. Reverse Geocode
+      List<Placemark> placemarks = await placemarkFromCoordinates(
+        position.latitude,
+        position.longitude,
+      );
+
+      String address = 'Unknown Location';
+      if (placemarks.isNotEmpty) {
+        final Placemark place = placemarks.first;
+        address = [
+          place.locality,
+          place.administrativeArea,
+          place.country,
+        ].where((e) => e != null && e!.isNotEmpty).join(', ');
+      }
+
+      fromController.text = address;
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Location set to: $address')),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error getting location: ${e.toString()}')),
+      );
+    } finally {
+      setState(() {
+        _isLocating = false;
+      });
+    }
+  }
+
+  // Gemini API Call
   Future<Map<String, dynamic>> _callGeminiApi(String prompt) async {
-    // 1. Initialize the Gemini Model
     final model = GenerativeModel(
       model: 'gemini-2.5-flash',
       apiKey: _apiKey,
     );
-    
-    // 2. Generate content using the simplest signature 
+
     final response = await model.generateContent(
       [Content.text(prompt)],
     );
 
     if (response.text == null || response.text!.isEmpty) {
-      throw Exception("Gemini API returned an empty response. Check API key validity or network.");
+      throw Exception(
+        "Gemini API returned an empty response. Check API key validity or network.",
+      );
     }
-    
-    // 3. Clean and parse the response text assuming it's JSON
+
     try {
-        return json.decode(response.text!) as Map<String, dynamic>;
+      return json.decode(response.text!) as Map<String, dynamic>;
     } catch (e) {
-        // Fallback for cleaning up common markdown fences
-        String cleanedText = response.text!.trim();
-        if (cleanedText.startsWith('```json')) {
-          cleanedText = cleanedText.substring(7);
-        }
-        if (cleanedText.endsWith('```')) {
-          cleanedText = cleanedText.substring(0, cleanedText.length - 3);
-        }
-        return json.decode(cleanedText) as Map<String, dynamic>;
+      String cleanedText = response.text!.trim();
+      if (cleanedText.startsWith('```json')) {
+        cleanedText = cleanedText.substring(7);
+      }
+      if (cleanedText.endsWith('```')) {
+        cleanedText = cleanedText.substring(0, cleanedText.length - 3);
+      }
+      return json.decode(cleanedText) as Map<String, dynamic>;
     }
   }
-
-  // --- Logic Functions ---
 
   @override
   void dispose() {
     _scrollController.dispose();
-    fromController.removeListener(_onFromChanged); // REMOVE LISTENER
+    fromController.removeListener(_onFromChanged);
     fromController.dispose();
-    _fromFocusNode.removeListener(_onFocusChanged); // REMOVE FOCUS LISTENER
-    _fromFocusNode.dispose(); // DISPOSE FOCUS NODE
+    _fromFocusNode.removeListener(_onFocusChanged);
+    _fromFocusNode.dispose();
     toController.dispose();
     budgetController.dispose();
     daysController.dispose();
@@ -540,28 +549,26 @@ class _PlanTabState extends State<PlanTab> {
     super.dispose();
   }
 
-  // DEFINITIVE FIX: Use the standard, universal Google Maps search URL scheme.
+  // Open a map URL
   Future<void> _openMap(BuildContext context, String query) async {
-    // 1. Encode the query for a safe URL
     final String encodedQuery = Uri.encodeComponent(query);
-    
-    // 2. Construct the CORRECT, robust Google Maps search URL (Universal standard).
-    // CORRECTED URL: The previous URL was incorrect. This is a common standard search link.
-    final Uri url = Uri.parse('https://www.google.com/maps/search/?api=1&query=$encodedQuery');
+    final Uri url =
+        Uri.parse('https://www.google.com/maps/search/?api=1&query=$encodedQuery');
 
-    // 3. Launch the URL using the url_launcher package
     if (await canLaunchUrl(url)) {
-      // Use externalApplication mode to force the device to open the dedicated Maps app or browser
       await launchUrl(url, mode: LaunchMode.externalApplication);
     } else {
-      // If the URL cannot be launched, show an error message
       ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text('Could not launch map for: $query. Check if you have a browser or map app installed.')),
+        SnackBar(
+          content: Text(
+            'Could not launch map for: $query. Check if you have a browser or map app installed.',
+          ),
+        ),
       );
     }
   }
-  
-  // NEW: Function to save the current plan to local storage
+
+  // Save plan to SharedPreferences
   void _savePlan() async {
     if (_generatedPlan == null) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -571,21 +578,35 @@ class _PlanTabState extends State<PlanTab> {
     }
 
     try {
-      // 1. Get SharedPreferences instance
       final prefs = await SharedPreferences.getInstance();
-      
-      // 2. Load existing plans (or an empty list if none exist)
       final savedPlansJson = prefs.getStringList('savedTripPlans') ?? [];
-      
-      // 3. Convert the current plan Map<String, dynamic> to a JSON string
-      final planJsonString = jsonEncode(_generatedPlan);
-      
-      // 4. Add the new JSON string to the list
-      savedPlansJson.add(planJsonString);
-      
-      // 5. Save the updated list back to SharedPreferences
+
+      final from = fromController.text.trim();
+      final to = toController.text.trim();
+      final membersText = travellersController.text.trim();
+      final members =
+          int.tryParse(membersText.isEmpty ? '1' : membersText) ?? 1;
+
+      final meta = {
+       'from': from,
+       'to': to,
+       'members': members,
+       'savedAt': DateTime.now().toIso8601String(),
+       'plannedDate': _startDate?.toIso8601String(),   // <-- NEW
+       'tripName': (from.isNotEmpty && to.isNotEmpty)
+          ? '$from → $to'
+          : (from.isNotEmpty ? from : 'Trip ${savedPlansJson.length + 1}'),
+      };
+
+
+      final planToStore = {
+        'meta': meta,
+        ..._generatedPlan!, // includes estimatedTotalCost, routeStops, etc.
+      };
+
+      savedPlansJson.add(jsonEncode(planToStore));
       await prefs.setStringList('savedTripPlans', savedPlansJson);
-      
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Plan saved successfully!')),
       );
@@ -596,30 +617,28 @@ class _PlanTabState extends State<PlanTab> {
     }
   }
 
-  // Method to reset the entire plan form
+  // Reset entire form
   void _resetPlan() {
     setState(() {
       fromController.clear();
       toController.clear();
-      // Reset the budget slider and controller text to default 'Mid Budget'
-      _budgetSliderValue = 5.0; 
+      _budgetSliderValue = 5.0;
       budgetController.text = _getBudgetLevel(_budgetSliderValue);
       daysController.clear();
       travellersController.clear();
       selectedVehicle = null;
-      _startDate = null; // Clear the start date
-      _startDateString = 'Select Start Date'; // Reset display string
-      _generatedPlan = null; // Clear the generated plan
+      _startDate = null;
+      _startDateString = 'Select Start Date';
+      _generatedPlan = null;
       _isLoading = false;
-      widget.onRouteUpdate([]); // Notify HomeScreen to clear weather stops
+      widget.onRouteUpdate([]);
     });
 
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text('Plan reset. Start a new trip!')),
     );
   }
-
-  // Method to generate the travel plan using Gemini API
+  // Generate the travel plan using Gemini
   void _generatePlan() async {
     if (fromController.text.isEmpty || toController.text.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -630,38 +649,33 @@ class _PlanTabState extends State<PlanTab> {
 
     setState(() {
       _isLoading = true;
-      _generatedPlan = null; // Clear previous plan
+      _generatedPlan = null;
     });
 
-    // 1. Prepare Variables for the Prompt
     final String days = daysController.text.isNotEmpty ? daysController.text : '3';
     final String start = fromController.text.trim();
     final String end = toController.text.trim();
-    
-    // Hardcoded Interests (since no input field exists)
-    const String interests = 'scenic drives, local cuisine, and history'; 
-    
-    final String members = travellersController.text.isNotEmpty ? travellersController.text : '2';
-    // Use the qualitative budget level from the slider
-    final String budget = _getBudgetLevel(_budgetSliderValue); 
-    final String vehicle = selectedVehicle ?? 'Car'; // Default to Car
-    
-    // Date Context Logic
+
+    const String interests = 'scenic drives, local cuisine, and history';
+
+    final String members =
+        travellersController.text.isNotEmpty ? travellersController.text : '2';
+    final String budget = _getBudgetLevel(_budgetSliderValue);
+    final String vehicle = selectedVehicle ?? 'Car';
+
     String dayType = 'Weekday';
     String dateInfo = '';
     if (_startDate != null) {
       dayType = _getDayType(_startDate!);
-      String tripStartDate = DateFormat('EEE, MMM d, yyyy').format(_startDate!);
-      dateInfo = 
+      String tripStartDate =
+          DateFormat('EEE, MMM d, yyyy').format(_startDate!);
+      dateInfo =
           'The trip starts on the specific date: $tripStartDate, which falls on a $dayType. Please structure the plan and activities, especially pricing for accommodation, to reflect if it is a $dayType (e.g., higher prices on weekends).';
     } else {
-      dateInfo = 'The trip date is not specified. Assume a generic weekday starting 3 days from the current time.';
+      dateInfo =
+          'The trip date is not specified. Assume a generic weekday starting 3 days from the current time.';
     }
 
-
-    // 2. Prepare CRITICAL INSTRUCTIONS (Logic)
-
-    // NEW: Instruction for the estimated budget calculation
     final String budgetEstimationInstruction = '''
     Calculate a realistic **Estimated Total Cost** for this entire trip (accommodation, fuel/charge, and food/activities) in Indian Rupees (INR). 
     This estimate must be based on:
@@ -673,21 +687,22 @@ class _PlanTabState extends State<PlanTab> {
     - The route distance (which you must estimate yourself based on $start to $end).
     The result must be a single string in the format: '₹X,XXX - ₹Y,YYY' and be placed in the new 'estimatedTotalCost' field.
     ''';
-    
+
     final int numMembers = int.tryParse(members) ?? 2;
     final int numRooms = (numMembers / 2).ceil();
 
-    // UPDATED: Accommodation logic to use the qualitative budget level
-    final String accommodationLogic = "The $numMembers travelers will likely need about $numRooms room(s). Based on the chosen **$budget** level, find appropriate accommodation recommendations (e.g., cost-effective hostels for 'Low Budget', 4-star hotels for 'High Budget'). Crucially, recommend accommodation in less expensive outskirts or satellite areas near the route's mid-points to save budget for the final destination. Ensure the recommendations are tailored to a $dayType.";
+    final String accommodationLogic =
+        "The $numMembers travelers will likely need about $numRooms room(s). Based on the chosen **$budget** level, find appropriate accommodation recommendations (e.g., cost-effective hostels for 'Low Budget', 4-star hotels for 'High Budget'). Crucially, recommend accommodation in less expensive outskirts or satellite areas near the route's mid-points to save budget for the final destination. Ensure the recommendations are tailored to a $dayType.";
 
     String stopLogic;
     if (vehicle.toLowerCase().contains('ev')) {
-      stopLogic = "Recommend **specific EV charging stations** (e.g., Electrify America) and ensure they are well-spaced for an EV's range.";
+      stopLogic =
+          "Recommend **specific EV charging stations** and ensure they are well-spaced for an EV's range.";
     } else {
-      stopLogic = "Recommend **specific fuel stops** (e.g., Shell, BP) and major rest areas, ensuring they are well-spaced for a standard vehicle.";
+      stopLogic =
+          "Recommend **specific fuel stops** (e.g., Shell, BP) and major rest areas, ensuring they are well-spaced for a standard vehicle.";
     }
 
-    // Smart Advisor Logic
     final String smartAdvisorLogic = '''
     Generate a list of at least five highly practical tips for the 'smartAdvisorTips' array. The focus MUST be only on the road trip itself, from the start point to the end point, and NOT on activities once the destination is reached.
 
@@ -699,7 +714,6 @@ class _PlanTabState extends State<PlanTab> {
     5.  **Traffic Avoidance:** Heading 'Traffic & Timing'. Suggest the best time of day (e.g., 'start at 4 AM') or a specific small detour to bypass the worst traffic congestion on the route.
     ''';
 
-    // 3. Construct the Final Prompt (NOW WITH BUDGET CALCULATION)
     final String finalPrompt = '''
       You are a specialized road trip planning AI. Your task is to generate a comprehensive road trip plan for a $days-day journey from $start to $end.
       The traveler is interested in: $interests.
@@ -722,21 +736,19 @@ class _PlanTabState extends State<PlanTab> {
     ''';
 
     try {
-      // 4. Call the Gemini API
       final Map<String, dynamic> result = await _callGeminiApi(finalPrompt);
 
       setState(() {
         _generatedPlan = result;
         _isLoading = false;
-        
-        // 5. Send routeStops to HomeScreen for Weather tab
-        // Safely extract the list, handling potential null or wrong type by defaulting to an empty list
-        final List<String> routeStops = List<String>.from((_generatedPlan!['routeStops'] as List?)?.whereType<String>() ?? []);
 
+        final List<String> routeStops =
+            List<String>.from((_generatedPlan!['routeStops'] as List? )
+                    ?.whereType<String>() ??
+                []);
         widget.onRouteUpdate(routeStops);
       });
 
-      // Scroll to bottom after generating plan
       WidgetsBinding.instance.addPostFrameCallback((_) {
         if (_scrollController.hasClients) {
           _scrollController.animateTo(
@@ -746,24 +758,26 @@ class _PlanTabState extends State<PlanTab> {
           );
         }
       });
+
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('Smart plan generated by AI!')),
       );
-
     } catch (e) {
       setState(() {
         _isLoading = false;
       });
       ScaffoldMessenger.of(context).showSnackBar(
         SnackBar(
-          content: Text('Error generating plan. The AI likely failed to return clean JSON. Error: ${e.toString()}'),
+          content: Text(
+            'Error generating plan. The AI likely failed to return clean JSON. Error: ${e.toString()}',
+          ),
           duration: const Duration(seconds: 5),
         ),
       );
     }
   }
 
-  // METHOD: Show the modal radio button selection dialog
+  // Vehicle selection dialog
   void _showVehicleSelectionDialog(BuildContext context) {
     String? tempSelected = selectedVehicle;
     final List<Map<String, String>> vehicles = const [
@@ -771,7 +785,7 @@ class _PlanTabState extends State<PlanTab> {
       {'name': 'Car', 'emoji': '🚗'},
       {'name': 'EV', 'emoji': '🔋'},
     ];
-    
+
     const double emojiFontSize = 26.0;
 
     showDialog<String>(
@@ -780,14 +794,17 @@ class _PlanTabState extends State<PlanTab> {
         return StatefulBuilder(
           builder: (context, setStateSB) {
             return AlertDialog(
-              shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(15)),
+              shape: RoundedRectangleBorder(
+                borderRadius: BorderRadius.circular(15),
+              ),
               title: const Text('Select Vehicle'),
               contentPadding: const EdgeInsets.only(top: 12.0),
               content: Column(
                 mainAxisSize: MainAxisSize.min,
                 children: vehicles.map((vehicleMap) {
-                  final String value = '${vehicleMap['name']} ${vehicleMap['emoji']}';
-                  
+                  final String value =
+                      '${vehicleMap['name']} ${vehicleMap['emoji']}';
+
                   return RadioListTile<String>(
                     title: Row(
                       children: [
@@ -839,70 +856,144 @@ class _PlanTabState extends State<PlanTab> {
     });
   }
 
-  // UPDATED: Helper widget to build the sections based on Gemini's JSON output
-  Widget _buildPlanSection(String title, List<dynamic> items, {bool isRoute = false}) {
+  // --- NEW: Helper methods for previews + detailed lists for the cards ---
+
+  String _buildOverviewPreview(
+    String tripStartDateText,
+    String formattedNow,
+    Map<String, dynamic> plan,
+  ) {
+    final cost = plan['estimatedTotalCost'] ?? '';
+    final summary = plan['itinerarySummary'] ?? '';
+
+    return 'Estimated cost: $cost.\n'
+        'Trip start: $tripStartDateText.\n'
+        'Plan generated: $formattedNow.\n'
+        '$summary';
+  }
+
+  String _buildRoutePreview(List<dynamic> routeStops) {
+    final List<String> stops =
+        routeStops.whereType<String>().toList(growable: false);
+    if (stops.isEmpty) return 'No route information available.';
+    return stops.take(6).join(' → ');
+  }
+
+  String _buildNamesPreview(List<dynamic> items) {
+    final names = items
+        .map((e) => (e as Map<String, dynamic>)['name'] as String?)
+        .whereType<String>()
+        .toList(growable: false);
+    if (names.isEmpty) return 'No items available.';
+    return names.take(4).join(', ');
+  }
+
+  String _buildTipsPreview(List<dynamic> tips) {
+    final headings = tips
+        .map((e) => (e as Map<String, dynamic>)['heading'] as String?)
+        .whereType<String>()
+        .toList(growable: false);
+    if (headings.isEmpty) return 'No tips available.';
+    return headings.take(4).join('. ');
+  }
+
+  Widget _buildRouteDetailsList(List<dynamic> items) {
+    final List<String> stops =
+        items.whereType<String>().toList(growable: false);
+
     return Column(
       crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        const SizedBox(height: 24),
-        Text(title,
-            style: const TextStyle(fontWeight: FontWeight.w600, fontSize: 16)),
-        Padding(
-          padding: const EdgeInsets.only(left: 14, top: 10),
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: items.map((item) {
-              String name;
-              String? mapQuery;
-
-              if (isRoute) {
-                // Handle routeStops (simple list of strings)
-                name = item as String;
-                final index = items.indexOf(item);
-                final isLast = index == items.length - 1;
-                return Text(isLast ? "• $name" : "• $name →" , style: const TextStyle(fontSize: 15));
-              } else {
-                // Handle complex objects (tourist, hotels, stops)
-                final itemMap = item as Map<String, dynamic>;
-                name = itemMap['name'] as String;
-                mapQuery = itemMap['mapSearchQuery'] as String;
-
-                // CORRECTED: Tap action now calls the _openMap function
-                return GestureDetector(
-                  onTap: () => _openMap(context, mapQuery!),
-                  child: Padding(
-                    padding: const EdgeInsets.only(bottom: 4),
-                    child: Text(
-                      "• $name",
-                      style: TextStyle(
-                          color: Colors.indigo.shade700,
-                          fontSize: 15,
-                          decoration: TextDecoration.underline),
-                    ),
-                  ), 
-                ); 
-              }
-            }).toList(),
+      children: stops.map((name) {
+        final index = stops.indexOf(name);
+        final isLast = index == stops.length - 1;
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 4),
+          child: Text(
+            isLast ? '• $name' : '• $name →',
+            style: const TextStyle(fontSize: 15),
           ),
-        ),
-      ],
+        );
+      }).toList(),
     );
   }
-  
+
+  Widget _buildClickableNameList(List<dynamic> items) {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: items.map((rawItem) {
+        final item = rawItem as Map<String, dynamic>;
+        final String name = (item['name'] ?? '') as String;
+        final String mapQuery =
+            (item['mapSearchQuery'] ?? name) as String;
+
+        if (name.isEmpty) return const SizedBox.shrink();
+
+        return GestureDetector(
+          onTap: () => _openMap(context, mapQuery),
+          child: Padding(
+            padding: const EdgeInsets.only(bottom: 4),
+            child: Text(
+              '• $name',
+              style: TextStyle(
+                color: Colors.indigo.shade700,
+                fontSize: 15,
+                decoration: TextDecoration.underline,
+              ),
+            ),
+          ),
+        );
+      }).toList(),
+    );
+  }
+
+  Widget _buildSmartTipsDetails(List<dynamic> tips) {
+    if (tips.isEmpty) {
+      return const Text('No specific suggestions generated.');
+    }
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: tips.map((tipItem) {
+        final Map<String, dynamic> item = tipItem as Map<String, dynamic>;
+        final String heading = item['heading'] as String? ?? 'Tip';
+        final String tip = item['tip'] as String? ?? 'No detail provided.';
+
+        return Padding(
+          padding: const EdgeInsets.only(bottom: 12),
+          child: Column(
+            crossAxisAlignment: CrossAxisAlignment.start,
+            children: [
+              Text(
+                '• $heading',
+                style: TextStyle(
+                  fontSize: 16,
+                  fontWeight: FontWeight.bold,
+                  color: Colors.indigo.shade700,
+                ),
+              ),
+              const SizedBox(height: 4),
+              Text(
+                tip,
+                style: const TextStyle(fontSize: 15),
+              ),
+            ],
+          ),
+        );
+      }).toList(),
+    );
+  }
   @override
   Widget build(BuildContext context) {
-    // Get the current date and time for the 'Plan Generated' stamp
     final now = DateTime.now();
     final formattedNow = DateFormat('MMM d, yyyy - hh:mm a').format(now);
 
-    // Get the selected trip start date string
-    final String tripStartDateText = _startDate != null 
-        ? DateFormat('EEE, MMM d, yyyy').format(_startDate!) 
-        : 'Not Specified (Assumed Weekday)'; 
-        
-    // Logic to determine if the "Use current location" button should be visible
-    final bool showCurrentLocationOption = fromController.text.isEmpty && !_fromFocusNode.hasFocus;
-        
+    final String tripStartDateText = _startDate != null
+        ? DateFormat('EEE, MMM d, yyyy').format(_startDate!)
+        : 'Not Specified (Assumed Weekday)';
+
+    final bool showCurrentLocationOption =
+        fromController.text.isEmpty && !_fromFocusNode.hasFocus;
+
     return SingleChildScrollView(
       controller: _scrollController,
       padding: const EdgeInsets.all(20.0),
@@ -910,24 +1001,26 @@ class _PlanTabState extends State<PlanTab> {
         shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
         elevation: 8,
         child: Padding(
-          padding: const EdgeInsets.symmetric(vertical: 24.0, horizontal: 26.0),
+          padding:
+              const EdgeInsets.symmetric(vertical: 24.0, horizontal: 26.0),
           child: Column(
             crossAxisAlignment: CrossAxisAlignment.start,
             children: [
               const SizedBox(height: 24),
-              // --- Input Fields ---
               TextField(
                 controller: fromController,
-                focusNode: _fromFocusNode, // Assign the FocusNode
+                focusNode: _fromFocusNode,
                 decoration: InputDecoration(
                   labelText: "From",
                   hintText: "e.g., Bengaluru",
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12),
                 ),
               ),
-              
-              // --- NEW: Use Current Location Option ---
+
               if (showCurrentLocationOption)
                 Padding(
                   padding: const EdgeInsets.only(top: 8.0),
@@ -936,20 +1029,20 @@ class _PlanTabState extends State<PlanTab> {
                     child: Row(
                       mainAxisSize: MainAxisSize.min,
                       children: [
-                        _isLocating 
-                          ? const SizedBox(
-                              height: 16,
-                              width: 16,
-                              child: CircularProgressIndicator(
-                                strokeWidth: 2,
-                                color: Colors.indigo,
+                        _isLocating
+                            ? const SizedBox(
+                                height: 16,
+                                width: 16,
+                                child: CircularProgressIndicator(
+                                  strokeWidth: 2,
+                                  color: Colors.indigo,
+                                ),
+                              )
+                            : Icon(
+                                Icons.my_location,
+                                color: Colors.indigo.shade700,
+                                size: 18,
                               ),
-                            )
-                          : Icon(
-                              Icons.my_location, 
-                              color: Colors.indigo.shade700, 
-                              size: 18
-                            ),
                         const SizedBox(width: 8),
                         Text(
                           _isLocating ? 'Locating...' : 'Use current location',
@@ -962,68 +1055,79 @@ class _PlanTabState extends State<PlanTab> {
                     ),
                   ),
                 ),
-              // --- END NEW: Use Current Location Option ---
-              
+
               const SizedBox(height: 16),
               TextField(
                 controller: toController,
                 decoration: InputDecoration(
                   labelText: "To",
                   hintText: "e.g., Goa",
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12),
                 ),
               ),
               const SizedBox(height: 16),
-              
-              // --- BUDGET SLIDER INPUT SECTION (UPDATED FOR 0-11 SCALE) ---
+
               Column(
                 crossAxisAlignment: CrossAxisAlignment.start,
                 children: [
-                  // Text Field to display the current qualitative budget value
                   TextField(
                     controller: budgetController,
-                    readOnly: true, // Make it read-only since the slider controls the value
+                    readOnly: true,
                     decoration: InputDecoration(
                       labelText: "Budget Level",
                       hintText: "Mid Budget",
                       prefix: const Text('Budget: '),
-                      border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                      contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                      border: OutlineInputBorder(
+                        borderRadius: BorderRadius.circular(10),
+                      ),
+                      contentPadding:
+                          const EdgeInsets.symmetric(horizontal: 12),
                     ),
                   ),
-                  
-                  // Slider (0 to 11, 11 divisions)
                   Slider(
                     value: _budgetSliderValue,
                     min: 0.0,
                     max: 11.0,
-                    divisions: 11, 
+                    divisions: 11,
                     label: _budgetSliderValue.round().toString(),
                     onChanged: (double newValue) {
                       setState(() {
                         _budgetSliderValue = newValue;
-                        // Update the text field to reflect the new qualitative budget level
-                        budgetController.text = _getBudgetLevel(_budgetSliderValue);
+                        budgetController.text =
+                            _getBudgetLevel(_budgetSliderValue);
                       });
                     },
                   ),
-                  
-                  // Label for the slider range
-                  Padding(
-                    padding: const EdgeInsets.only(left: 12.0, right: 12.0, bottom: 8.0),
+                  const Padding(
+                    padding: EdgeInsets.only(
+                      left: 12.0,
+                      right: 12.0,
+                      bottom: 8.0,
+                    ),
                     child: Row(
                       mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                      children: const [
-                        Text('Low (0)', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                        Text('Mid (5-7)', style: TextStyle(fontSize: 12, color: Colors.grey)),
-                        Text('High (11)', style: TextStyle(fontSize: 12, color: Colors.grey)),
+                      children: [
+                        Text(
+                          'Low (0)',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        Text(
+                          'Mid (5-7)',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
+                        Text(
+                          'High (11)',
+                          style: TextStyle(fontSize: 12, color: Colors.grey),
+                        ),
                       ],
                     ),
                   ),
                 ],
               ),
-              // --- END BUDGET SLIDER INPUT SECTION ---
 
               const SizedBox(height: 16),
               Row(
@@ -1048,12 +1152,15 @@ class _PlanTabState extends State<PlanTab> {
                                   selectedVehicle ?? "Vehicle",
                                   style: TextStyle(
                                     fontSize: 16,
-                                    color: selectedVehicle == null ? Colors.grey.shade600 : Colors.black,
+                                    color: selectedVehicle == null
+                                        ? Colors.grey.shade600
+                                        : Colors.black,
                                   ),
                                 ),
                               ),
                             ),
-                            const Icon(Icons.arrow_drop_down, color: Colors.grey),
+                            const Icon(Icons.arrow_drop_down,
+                                color: Colors.grey),
                           ],
                         ),
                       ),
@@ -1067,13 +1174,17 @@ class _PlanTabState extends State<PlanTab> {
                       decoration: InputDecoration(
                         labelText: "Days",
                         hintText: "e.g., 5",
-                        border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                        contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                        border: OutlineInputBorder(
+                          borderRadius: BorderRadius.circular(10),
+                        ),
+                        contentPadding:
+                            const EdgeInsets.symmetric(horizontal: 12),
                       ),
                     ),
                   ),
                 ],
               ),
+
               const SizedBox(height: 16),
               TextField(
                 controller: travellersController,
@@ -1081,13 +1192,15 @@ class _PlanTabState extends State<PlanTab> {
                 decoration: InputDecoration(
                   labelText: "No. of travellers",
                   hintText: "e.g., 2",
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+                  border: OutlineInputBorder(
+                    borderRadius: BorderRadius.circular(10),
+                  ),
+                  contentPadding:
+                      const EdgeInsets.symmetric(horizontal: 12),
                 ),
               ),
-              
-              // --- Trip Start Date Input (Neutral Style) ---
-              const SizedBox(height: 16), 
+
+              const SizedBox(height: 16),
               GestureDetector(
                 onTap: () => _selectDate(context),
                 child: Container(
@@ -1101,10 +1214,14 @@ class _PlanTabState extends State<PlanTab> {
                     mainAxisAlignment: MainAxisAlignment.spaceBetween,
                     children: [
                       Text(
-                        _startDateString == 'Select Start Date' ? 'Start Date' : 'Start Date: ${_startDateString}',
+                        _startDateString == 'Select Start Date'
+                            ? 'Start Date'
+                            : 'Start Date: $_startDateString',
                         style: TextStyle(
                           fontSize: 16,
-                          color: _startDateString == 'Select Start Date' ? Colors.grey.shade600 : Colors.black,
+                          color: _startDateString == 'Select Start Date'
+                              ? Colors.grey.shade600
+                              : Colors.black,
                         ),
                       ),
                       const Icon(Icons.calendar_today, color: Colors.grey),
@@ -1112,21 +1229,21 @@ class _PlanTabState extends State<PlanTab> {
                   ),
                 ),
               ),
-              // --- END Trip Start Date Input ---
-              
+
               const SizedBox(height: 26),
 
-              // --- Generate Plan & Refresh/Clear Buttons ---
               Row(
                 children: [
-                  // 1. Generate Plan Button (Existing)
                   Expanded(
                     child: ElevatedButton(
                       onPressed: _isLoading ? null : _generatePlan,
                       style: ElevatedButton.styleFrom(
                         backgroundColor: Colors.indigo,
-                        padding: const EdgeInsets.symmetric(vertical: 14),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        padding:
+                            const EdgeInsets.symmetric(vertical: 14),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                       child: _isLoading
                           ? const SizedBox(
@@ -1139,23 +1256,30 @@ class _PlanTabState extends State<PlanTab> {
                             )
                           : const Text(
                               "Generate Smart Plan (AI)",
-                              style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
+                              style: TextStyle(
+                                fontSize: 16,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.white,
+                              ),
                             ),
                     ),
                   ),
-                  
-                  // 2. Clear/Refresh Button (NEW POSITION & STYLE)
                   if (_showPlan || _isLoading) ...[
                     const SizedBox(width: 10),
                     ElevatedButton(
                       onPressed: _resetPlan,
                       style: ElevatedButton.styleFrom(
-                        backgroundColor: Colors.teal.shade600, // Kept the previous color
-                        padding: const EdgeInsets.symmetric(vertical: 14, horizontal: 16),
-                        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                        backgroundColor: Colors.teal.shade600,
+                        padding: const EdgeInsets.symmetric(
+                          vertical: 14,
+                          horizontal: 16,
+                        ),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(12),
+                        ),
                       ),
                       child: const Icon(
-                        Icons.refresh, // Renamed/Replaced with refresh icon
+                        Icons.refresh,
                         color: Colors.white,
                         size: 24,
                       ),
@@ -1163,138 +1287,298 @@ class _PlanTabState extends State<PlanTab> {
                   ],
                 ],
               ),
+
               const SizedBox(height: 30),
 
-              // --- AI GENERATED PLAN OUTPUT ---
-              if (_showPlan)
-                Container(
-                  width: double.infinity,
-                  decoration: BoxDecoration(
-                    color: Colors.indigo.shade50,
-                    borderRadius: BorderRadius.circular(16),
-                  ),
-                  padding: const EdgeInsets.all(22),
-                  child: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      // 1. Summary Title
-                      Text(
-                        "Trip Plan from ${fromController.text} to ${toController.text}",
-                        style: const TextStyle(fontWeight: FontWeight.bold, fontSize: 20),
-                      ),
-                      
-                      // --- NEW: Estimated Budget Section (Green colored) ---
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8.0, bottom: 4.0),
-                        child: Text(
-                          '💰 Estimated Total Cost: ${_generatedPlan!['estimatedTotalCost']}',
-                          style: TextStyle(
-                              fontSize: 17, 
-                              fontWeight: FontWeight.bold, 
-                              color: Colors.green.shade700
-                          ),
-                        ),
-                      ),
-                      // --- END Estimated Budget Section ---
+                 const SizedBox(height: 30),
 
-                      // --- Plan Date Info Section ---
-                      Padding(
-                        padding: const EdgeInsets.only(top: 8.0, bottom: 10.0),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
+              // ====== CLEAN FOLDABLE SECTIONS (ACCORDION STYLE) ======
+              if (_showPlan)
+                Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      "Your AI Smart Trip Plan",
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 20,
+                        color: Colors.indigo.shade700,
+                      ),
+                    ),
+                    const SizedBox(height: 12),
+
+                    // SECTION 1: OVERVIEW & BUDGET
+                    Card(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      elevation: 3,
+                      margin: const EdgeInsets.only(bottom: 10),
+                      child: Theme(
+                        data: Theme.of(context).copyWith(
+                          dividerColor: Colors.transparent,
+                        ),
+                        child: ExpansionTile(
+                          tilePadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 4,
+                          ),
+                          childrenPadding: const EdgeInsets.fromLTRB(
+                            16,
+                            0,
+                            16,
+                            12,
+                          ),
+                          title: const Text(
+                            "Overview & Budget",
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
                           children: [
                             Text(
-                              '🗓️ Trip Start Date: $tripStartDateText',
-                              style: TextStyle(fontSize: 15, fontWeight: FontWeight.w600, color: Colors.indigo.shade700),
+                              "Trip Plan from ${fromController.text} to ${toController.text}",
+                              style: const TextStyle(
+                                fontWeight: FontWeight.bold,
+                                fontSize: 15,
+                              ),
                             ),
-                            const SizedBox(height: 4),
+                            const SizedBox(height: 8),
+                            Text(
+                              '💰 Estimated Total Cost: ${_generatedPlan!['estimatedTotalCost']}',
+                              style: TextStyle(
+                                fontSize: 14,
+                                fontWeight: FontWeight.bold,
+                                color: Colors.green.shade700,
+                              ),
+                            ),
+                            const SizedBox(height: 8),
+                            Text(
+                              '🗓️ Trip Start Date: $tripStartDateText',
+                              style: TextStyle(
+                                fontSize: 13,
+                                fontWeight: FontWeight.w600,
+                                color: Colors.indigo.shade700,
+                              ),
+                            ),
+                            const SizedBox(height: 2),
                             Text(
                               '🕒 Plan Generated: $formattedNow',
-                              style: const TextStyle(fontSize: 11, color: Colors.grey),
+                              style: const TextStyle(
+                                fontSize: 11,
+                                color: Colors.grey,
+                              ),
                             ),
-                            const Divider(height: 20),
+                            const SizedBox(height: 10),
+                            const Divider(height: 16),
+                            Text(
+                              _generatedPlan!['itinerarySummary'] as String,
+                              style: const TextStyle(
+                                fontSize: 13,
+                                fontStyle: FontStyle.italic,
+                              ),
+                            ),
                           ],
                         ),
                       ),
-                      // --- END Plan Date Info Section ---
+                    ),
 
-                      // 2. Summary
-                      Text(
-                        _generatedPlan!['itinerarySummary'] as String,
-                        style: const TextStyle(fontSize: 15, fontStyle: FontStyle.italic),
+                    // SECTION 2: ROUTE
+                    Card(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
                       ),
-                      
-                      // 3. Directions/Route Stops
-                      _buildPlanSection(
-                        "🚗 Recommended Route:", 
-                        _generatedPlan!['routeStops'] as List<dynamic>, 
-                        isRoute: true,
-                      ),
-
-                      // 4. Tourist Stops
-                      _buildPlanSection(
-                        "📸 Must-See Tourist Stops (Click to Map):", 
-                        _generatedPlan!['touristStops'] as List<dynamic>,
-                      ),
-
-                      // 5. Hotel Recommendations
-                      _buildPlanSection(
-                        "🏨 Hotel Recommendations (Click to Map):", 
-                        _generatedPlan!['hotelRecommendations'] as List<dynamic>,
-                      ),
-
-                      // 6. Fuel/Rest Stops
-                      _buildPlanSection(
-                        "⛽ Service Stops (Click to Map):", 
-                        _generatedPlan!['stopRecommendations'] as List<dynamic>,
-                      ),
-                      
-                      const SizedBox(height: 24),
-                      // 7. Smart Advisor Tips (NEW SECTION)
-                      const Text("💡 Smart Advisor Tips:",
-                          style: TextStyle(fontWeight: FontWeight.bold, fontSize: 18, color: Colors.indigo)),
-                      Padding(
-                        padding: const EdgeInsets.only(top: 10),
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: (_generatedPlan!['smartAdvisorTips'] as List<dynamic>?)
-                              ?.map((tipItem) {
-                                final Map<String, dynamic> item = tipItem as Map<String, dynamic>;
-                                final String heading = item['heading'] as String? ?? 'Tip';
-                                final String tip = item['tip'] as String? ?? 'No detail provided.';
-                                
-                                return Padding(
-                                  padding: const EdgeInsets.only(bottom: 12),
-                                  child: Column(
-                                    crossAxisAlignment: CrossAxisAlignment.start,
-                                    children: [
-                                      // Heading is now bold and styled
-                                      Text(
-                                        "• $heading",
-                                        style: TextStyle(
-                                          fontSize: 16,
-                                          fontWeight: FontWeight.bold,
-                                          color: Colors.indigo.shade700,
-                                        ),
-                                      ),
-                                      const SizedBox(height: 4),
-                                      // Tip is the body text
-                                      Text(
-                                        tip, 
-                                        style: const TextStyle(fontSize: 15),
-                                      ),
-                                    ],
-                                  ),
-                                );
-                              })
-                              .toList() ?? [const Text("No specific suggestions generated.")],
+                      elevation: 3,
+                      margin: const EdgeInsets.only(bottom: 10),
+                      child: Theme(
+                        data: Theme.of(context).copyWith(
+                          dividerColor: Colors.transparent,
+                        ),
+                        child: ExpansionTile(
+                          tilePadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 4,
+                          ),
+                          childrenPadding: const EdgeInsets.fromLTRB(
+                            16,
+                            0,
+                            16,
+                            12,
+                          ),
+                          title: const Text(
+                            "Recommended Route",
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          children: [
+                            _buildRouteDetailsList(
+                              _generatedPlan!['routeStops'] as List<dynamic>,
+                            ),
+                          ],
                         ),
                       ),
-                    ],
-                  ),
+                    ),
+
+                    // SECTION 3: TOURIST STOPS
+                    Card(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      elevation: 3,
+                      margin: const EdgeInsets.only(bottom: 10),
+                      child: Theme(
+                        data: Theme.of(context).copyWith(
+                          dividerColor: Colors.transparent,
+                        ),
+                        child: ExpansionTile(
+                          tilePadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 4,
+                          ),
+                          childrenPadding: const EdgeInsets.fromLTRB(
+                            16,
+                            0,
+                            16,
+                            12,
+                          ),
+                          title: const Text(
+                            "Must-See Tourist Stops",
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          children: [
+                            _buildClickableNameList(
+                              _generatedPlan!['touristStops'] as List<dynamic>,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // SECTION 4: HOTELS
+                    Card(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      elevation: 3,
+                      margin: const EdgeInsets.only(bottom: 10),
+                      child: Theme(
+                        data: Theme.of(context).copyWith(
+                          dividerColor: Colors.transparent,
+                        ),
+                        child: ExpansionTile(
+                          tilePadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 4,
+                          ),
+                          childrenPadding: const EdgeInsets.fromLTRB(
+                            16,
+                            0,
+                            16,
+                            12,
+                          ),
+                          title: const Text(
+                            "Hotel Recommendations",
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          children: [
+                            _buildClickableNameList(
+                              _generatedPlan!['hotelRecommendations']
+                                  as List<dynamic>,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // SECTION 5: SERVICE STOPS
+                    Card(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      elevation: 3,
+                      margin: const EdgeInsets.only(bottom: 10),
+                      child: Theme(
+                        data: Theme.of(context).copyWith(
+                          dividerColor: Colors.transparent,
+                        ),
+                        child: ExpansionTile(
+                          tilePadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 4,
+                          ),
+                          childrenPadding: const EdgeInsets.fromLTRB(
+                            16,
+                            0,
+                            16,
+                            12,
+                          ),
+                          title: const Text(
+                            "Service Stops (Fuel / Charging)",
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          children: [
+                            _buildClickableNameList(
+                              _generatedPlan!['stopRecommendations']
+                                  as List<dynamic>,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+
+                    // SECTION 6: SMART ADVISOR TIPS
+                    Card(
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                      elevation: 3,
+                      margin: const EdgeInsets.only(bottom: 10),
+                      child: Theme(
+                        data: Theme.of(context).copyWith(
+                          dividerColor: Colors.transparent,
+                        ),
+                        child: ExpansionTile(
+                          tilePadding: const EdgeInsets.symmetric(
+                            horizontal: 16,
+                            vertical: 4,
+                          ),
+                          childrenPadding: const EdgeInsets.fromLTRB(
+                            16,
+                            0,
+                            16,
+                            12,
+                          ),
+                          title: const Text(
+                            "Smart Advisor Tips",
+                            style: TextStyle(
+                              fontSize: 15,
+                              fontWeight: FontWeight.w600,
+                            ),
+                          ),
+                          children: [
+                            _buildSmartTipsDetails(
+                              _generatedPlan!['smartAdvisorTips']
+                                  as List<dynamic>,
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
                 ),
-            
-              // --- Save Plan Button (NEW POSITION) ---
+
               if (_showPlan)
                 Column(
                   children: [
@@ -1302,15 +1586,21 @@ class _PlanTabState extends State<PlanTab> {
                     SizedBox(
                       width: double.infinity,
                       child: ElevatedButton(
-                        onPressed: _savePlan, // Call the new save function
+                        onPressed: _savePlan,
                         style: ElevatedButton.styleFrom(
-                          backgroundColor: Colors.green.shade600, // Distinct color for Save
+                          backgroundColor: Colors.green.shade600,
                           padding: const EdgeInsets.symmetric(vertical: 14),
-                          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                          shape: RoundedRectangleBorder(
+                            borderRadius: BorderRadius.circular(12),
+                          ),
                         ),
                         child: const Text(
-                          "Save Plan", // New button text
-                          style: TextStyle(fontSize: 16, fontWeight: FontWeight.w600, color: Colors.white),
+                          "Save Plan",
+                          style: TextStyle(
+                            fontSize: 16,
+                            fontWeight: FontWeight.w600,
+                            color: Colors.white,
+                          ),
                         ),
                       ),
                     ),

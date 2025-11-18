@@ -1,7 +1,7 @@
 // expense_tab.dart
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart'; // For local storage
-import 'dart:convert'; // For JSON encoding
+import 'package:shared_preferences/shared_preferences.dart';
+import 'dart:convert';
 
 class ExpenseTab extends StatefulWidget {
   const ExpenseTab({Key? key}) : super(key: key);
@@ -13,105 +13,187 @@ class ExpenseTab extends StatefulWidget {
 class ExpenseItem {
   final String item;
   final double amount;
+  final int splitMembers;
 
-  ExpenseItem(this.item, this.amount);
+  ExpenseItem(this.item, this.amount, this.splitMembers);
 
-  // Convert ExpenseItem to a Map for JSON encoding
   Map<String, dynamic> toJson() => {
         'item': item,
         'amount': amount,
+        'splitMembers': splitMembers,
       };
 }
 
 class _ExpenseTabState extends State<ExpenseTab> {
   final TextEditingController _itemController = TextEditingController();
   final TextEditingController _amountController = TextEditingController();
-  final TextEditingController _membersController = TextEditingController();
+  final TextEditingController _splitMembersController =
+      TextEditingController(text: '1');
+  final TextEditingController _totalTravelersInputController =
+      TextEditingController(text: '1');
 
-  // Color Definitions
-  final Color _primaryButtonColor = const Color(0xFF928FD2);    // Add and Reset Button Color: #928FD2
-  final Color _clearButtonColor = const Color(0xFF7672CB);      // End Clear Button Color: #7672CB
-  final Color _indigoColor = Colors.indigo.shade600;            
+  final FocusNode _tripDropdownFocusNode = FocusNode();
 
-  // State variables
-  List<ExpenseItem> _expenses = []; 
-  
-  // UPDATED: Function to save the current expense list with full metadata
-  void _saveExpenses() async {
-    if (_expenses.isEmpty) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("No expenses to save.")),
-      );
-      return;
+  final Color _primaryButtonColor = const Color(0xFF928FD2);
+  final Color _clearButtonColor = const Color(0xFF7672CB);
+  final Color _indigoColor = Colors.indigo.shade600;
+
+  List<ExpenseItem> _expenses = [];
+
+  /// Each plan map will have:
+  /// {
+  ///   "id": "...",                   // unique id
+  ///   "tripRoute": "From → To",
+  ///   "tripStartDate": "YYYY-MM-DD" or "No Date",
+  ///   "travelers": "2",
+  ///   "estimatedTotalCost": "₹.. - ₹.."
+  /// }
+  List<Map<String, dynamic>> _savedPlans = [];
+  Map<String, dynamic>? _selectedTrip;
+  int _totalTravelers = 1;
+
+  @override
+  void initState() {
+    super.initState();
+    _loadPlans();
+    _totalTravelers =
+        int.tryParse(_totalTravelersInputController.text) ?? 1;
+
+    _tripDropdownFocusNode.addListener(() {
+      if (_tripDropdownFocusNode.hasFocus) {
+        _loadPlans();
+      }
+    });
+  }
+
+  @override
+  void dispose() {
+    _itemController.dispose();
+    _amountController.dispose();
+    _splitMembersController.dispose();
+    _totalTravelersInputController.dispose();
+    _tripDropdownFocusNode.dispose();
+    super.dispose();
+  }
+
+  // --------------------------------------------------------------------------
+  // Load plans from SharedPreferences (MATCHES main.dart format)
+  // --------------------------------------------------------------------------
+  Future<void> _loadPlans() async {
+    final prefs = await SharedPreferences.getInstance();
+    final List<String> savedPlansJson =
+        prefs.getStringList('savedTripPlans') ?? [];
+
+    final List<Map<String, dynamic>> loadedPlans = [];
+
+    // Latest first
+    for (final jsonString in savedPlansJson.reversed) {
+      try {
+        final Map<String, dynamic> raw =
+            jsonDecode(jsonString) as Map<String, dynamic>;
+        final Map<String, dynamic> meta =
+            (raw['meta'] ?? {}) as Map<String, dynamic>;
+
+        final String from = (meta['from'] ?? '') as String;
+        final String to = (meta['to'] ?? '') as String;
+        final String tripName =
+            (meta['tripName'] ?? (from.isNotEmpty && to.isNotEmpty
+                    ? '$from → $to'
+                    : 'Trip')) as String;
+        final dynamic membersRaw = meta['members'] ?? 1;
+        final int members = membersRaw is int
+            ? membersRaw
+            : int.tryParse(membersRaw.toString()) ?? 1;
+
+        final String? plannedIso =
+            meta['plannedDate'] as String?;
+        final String tripDateDisplay = (plannedIso != null &&
+                plannedIso.isNotEmpty)
+            ? plannedIso.split('T').first
+            : 'No Date';
+
+        final String estimatedCost =
+            (raw['estimatedTotalCost'] ?? '') as String;
+
+        loadedPlans.add({
+          'id': '$tripName|$tripDateDisplay|$members',
+          'tripRoute': tripName,
+          'tripStartDate': tripDateDisplay,
+          'travelers': members.toString(),
+          'estimatedTotalCost': estimatedCost,
+        });
+      } catch (e) {
+        print('Error decoding plan JSON in ExpenseTab: $e');
+      }
     }
-    
-    // Calculate values based on current state
-    final int membersCount = int.tryParse(_membersController.text) ?? 1;
-    final double total = _totalAmount;
-    final double perPerson = _perPersonAmount;
 
-    // 1. Prepare the complete historical record
-    final Map<String, dynamic> recordMetadata = {
-      'timestamp': DateTime.now().toIso8601String(), // Add timestamp
-      'members': membersCount,
-      'total': total,
-      'perPerson': perPerson.toStringAsFixed(2), // Save as string for precision
-      'items': _expenses.map((e) => e.toJson()).toList() // Detailed items list
+    if (!mounted) return;
+
+    setState(() {
+      _savedPlans = loadedPlans;
+
+      // keep selectedTrip if still present
+      if (_selectedTrip != null &&
+          !_savedPlans.any(
+              (p) => p['id'] == _selectedTrip!['id'])) {
+        _selectedTrip = null;
+        _totalTravelers =
+            int.tryParse(_totalTravelersInputController.text) ?? 1;
+        _splitMembersController.text =
+            _totalTravelers.toString();
+      }
+    });
+  }
+
+  // --------------------------------------------------------------------------
+  // Calculations
+  // --------------------------------------------------------------------------
+  double get _totalAmount =>
+      _expenses.fold(0.0, (sum, item) => sum + item.amount);
+
+  Map<String, double> _calculateSplitDetails() {
+    double totalAmount = _totalAmount;
+
+    double totalSplitShareSum = _expenses.fold(
+        0.0,
+        (sum, item) =>
+            sum + (item.amount / item.splitMembers));
+
+    double perPersonShare = _totalTravelers > 0
+        ? totalAmount / _totalTravelers
+        : 0.0;
+
+    return {
+      'Total Expense': totalAmount,
+      'Total Travelers': _totalTravelers.toDouble(),
+      'Split Share per Traveler (Equal)': perPersonShare,
+      'Total Split Shares Sum (Items)': totalSplitShareSum,
     };
-    
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      
-      // *** FIX: Use the correct key 'savedExpenseRecords' matching the history screen ***
-      final List<String> savedRecordsJson = prefs.getStringList('savedExpenseRecords') ?? [];
-      
-      // 2. Add the new record (as a single JSON string)
-      savedRecordsJson.add(jsonEncode(recordMetadata));
-      
-      // 3. Save the updated list
-      await prefs.setStringList('savedExpenseRecords', savedRecordsJson);
-
-      ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Expenses saved successfully to history!")),
-      );
-      
-      // Clear current expense list after saving
-      setState(() {
-        _expenses.clear();
-        // Keep membersController value for next entry, as it's common to reuse
-      });
-
-    } catch (e) {
-      ScaffoldMessenger.of(context).showSnackBar(
-        SnackBar(content: Text("Error saving expenses: $e")),
-      );
-    }
-  }
-  
-  // --- Logic Functions ---
-
-  // Variable for calculation (default to 1 member)
-  double get _totalAmount {
-    return _expenses.fold(0.0, (sum, item) => sum + item.amount);
   }
 
-  double get _perPersonAmount {
-    int members = int.tryParse(_membersController.text) ?? 1;
-    return _totalAmount / (members > 0 ? members : 1);
-  }
-
+  // --------------------------------------------------------------------------
+  // Expense operations
+  // --------------------------------------------------------------------------
   void _addExpense() {
     final item = _itemController.text;
     final amountText = _amountController.text;
+    final splitMembersText = _splitMembersController.text;
 
-    if (item.isEmpty || amountText.isEmpty) {
+    if (item.isEmpty ||
+        amountText.isEmpty ||
+        splitMembersText.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text("Please enter both item and amount")),
+        const SnackBar(
+          content: Text(
+              "Please enter item, amount, and split members"),
+        ),
       );
       return;
     }
 
     final amount = double.tryParse(amountText);
+    final splitMembers = int.tryParse(splitMembersText);
+
     if (amount == null || amount <= 0) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("Please enter a valid amount")),
@@ -119,8 +201,23 @@ class _ExpenseTabState extends State<ExpenseTab> {
       return;
     }
 
+    if (splitMembers == null ||
+        splitMembers <= 0 ||
+        splitMembers > _totalTravelers) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text(
+            "Split members must be a valid number between 1 and $_totalTravelers (Total Travelers)",
+          ),
+        ),
+      );
+      return;
+    }
+
     setState(() {
-      _expenses.add(ExpenseItem(item, amount));
+      _expenses.add(
+        ExpenseItem(item, amount, splitMembers),
+      );
       _itemController.clear();
       _amountController.clear();
     });
@@ -135,93 +232,354 @@ class _ExpenseTabState extends State<ExpenseTab> {
   void _resetExpenses() {
     setState(() {
       _expenses.clear();
-      _membersController.clear();
+      _selectedTrip = null;
+      _totalTravelers = 1;
+      _splitMembersController.text = '1';
+      _totalTravelersInputController.text = '1';
     });
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(content: Text("Current expense list cleared.")),
+      const SnackBar(
+          content: Text("Current expense list cleared.")),
     );
   }
 
-  // --- Widget Builders ---
-  
+  void _saveExpenses() async {
+    if (_expenses.isEmpty) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(content: Text("No expenses to save.")),
+      );
+      return;
+    }
+
+    final double total = _totalAmount;
+
+    final Map<String, dynamic> recordMetadata = {
+      'timestamp': DateTime.now().toIso8601String(),
+      'total': total,
+      'trip_details': _selectedTrip != null
+          ? {
+              'name': _selectedTrip!['tripRoute'],
+              'date': _selectedTrip!['tripStartDate'],
+              'estimatedCost':
+                  _selectedTrip!['estimatedTotalCost'],
+              'travelers': _totalTravelers,
+            }
+          : 'Manual Entry',
+      'travelers': _totalTravelers,
+      'split_data': _calculateSplitDetails(),
+      'items': _expenses.map((e) => e.toJson()).toList()
+    };
+
+    try {
+      final prefs = await SharedPreferences.getInstance();
+
+      final List<String> savedRecordsJson =
+          prefs.getStringList('savedExpenseRecords') ?? [];
+      savedRecordsJson.add(jsonEncode(recordMetadata));
+      await prefs.setStringList(
+          'savedExpenseRecords', savedRecordsJson);
+
+      setState(() {
+        _expenses.clear();
+        _selectedTrip = null;
+        _totalTravelers = 1;
+        _splitMembersController.text = '1';
+        _totalTravelersInputController.text = '1';
+      });
+
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+            content: Text("Expense record saved successfully!")),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Failed to save expenses: $e"),
+        ),
+      );
+    }
+  }
+
+  // --------------------------------------------------------------------------
+  // UI Widgets
+  // --------------------------------------------------------------------------
+
+  Widget _buildTripSelection() {
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        DropdownButtonFormField<String>(
+          focusNode: _tripDropdownFocusNode,
+          decoration: InputDecoration(
+            labelText: 'Select Trip',
+            border: OutlineInputBorder(
+              borderRadius: BorderRadius.circular(10),
+            ),
+            contentPadding: const EdgeInsets.symmetric(
+                horizontal: 12, vertical: 8),
+          ),
+          value: _selectedTrip?['id'],
+          hint: const Text('Choose a saved trip plan'),
+          isExpanded: true,
+          items: [
+            const DropdownMenuItem<String>(
+              value: 'MANUAL',
+              child: Text('Manual Entry'),
+            ),
+            ..._savedPlans.map((plan) {
+              final String route =
+                  plan['tripRoute'] ?? 'Untitled Trip';
+              final String display =
+                  '$route (${plan['tripStartDate'] ?? 'No Date'})';
+              return DropdownMenuItem<String>(
+                value: plan['id'] as String,
+                child: Text(display),
+              );
+            }).toList(),
+          ],
+          onChanged: (String? selectedId) {
+            setState(() {
+              if (selectedId == 'MANUAL' || selectedId == null) {
+                _selectedTrip = null;
+                final manualCount =
+                    int.tryParse(_totalTravelersInputController
+                            .text) ??
+                        1;
+                _totalTravelers =
+                    manualCount > 0 ? manualCount : 1;
+                _splitMembersController.text =
+                    _totalTravelers.toString();
+                return;
+              }
+
+              _selectedTrip = _savedPlans.firstWhere(
+                  (plan) => plan['id'] == selectedId);
+
+              final String membersText =
+                  _selectedTrip!['travelers'] ?? '1';
+              final int members =
+                  int.tryParse(membersText) ?? 1;
+              _totalTravelers =
+                  members > 0 ? members : 1;
+              _splitMembersController.text =
+                  _totalTravelers.toString();
+              _totalTravelersInputController.text =
+                  _totalTravelers.toString();
+            });
+          },
+        ),
+        Padding(
+          padding: const EdgeInsets.only(top: 12.0),
+          child: _selectedTrip != null
+              ? Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      'Trip: ${_selectedTrip!['tripRoute']}',
+                      style: const TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    Text(
+                        'Date: ${_selectedTrip!['tripStartDate']}'),
+                    Text(
+                      'Total Travelers: $_totalTravelers',
+                      style: TextStyle(color: _indigoColor),
+                    ),
+                    Text(
+                      'Estimated Cost: ${_selectedTrip!['estimatedTotalCost'] ?? 'N/A'}',
+                      style: TextStyle(
+                        color: Colors.green.shade700,
+                        fontWeight: FontWeight.bold,
+                      ),
+                    ),
+                  ],
+                )
+              : Row(
+                  mainAxisAlignment:
+                      MainAxisAlignment.spaceBetween,
+                  children: [
+                    const Text(
+                      'Total Travelers:',
+                      style: TextStyle(
+                        fontWeight: FontWeight.bold,
+                        fontSize: 16,
+                      ),
+                    ),
+                    SizedBox(
+                      width: 80,
+                      child: TextField(
+                        controller:
+                            _totalTravelersInputController,
+                        keyboardType: TextInputType.number,
+                        textAlign: TextAlign.center,
+                        decoration: const InputDecoration(
+                          hintText: 'Count',
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.all(
+                              Radius.circular(10),
+                            ),
+                          ),
+                          contentPadding:
+                              EdgeInsets.symmetric(
+                                  horizontal: 5,
+                                  vertical: 10),
+                        ),
+                        onChanged: (value) {
+                          final newCount =
+                              int.tryParse(value) ?? 1;
+                          setState(() {
+                            _totalTravelers =
+                                newCount > 0 ? newCount : 1;
+                            if ((int.tryParse(
+                                        _splitMembersController
+                                            .text) ??
+                                    1) >
+                                _totalTravelers) {
+                              _splitMembersController.text =
+                                  _totalTravelers
+                                      .toString();
+                            }
+                          });
+                        },
+                      ),
+                    ),
+                  ],
+                ),
+        ),
+        const SizedBox(height: 20),
+      ],
+    );
+  }
+
   Widget _buildInputSection() {
     return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
       children: [
-        TextField(
-          controller: _itemController,
-          decoration: InputDecoration(
-            labelText: "Expense Item",
-            hintText: "e.g., Petrol, Food",
-            border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-            contentPadding: const EdgeInsets.symmetric(horizontal: 12),
-          ),
-        ),
-        const SizedBox(height: 16),
         Row(
+          crossAxisAlignment:
+              CrossAxisAlignment.start,
           children: [
             Expanded(
-              child: TextField(
-                controller: _amountController,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText: "Amount",
-                  hintText: "e.g., 1500",
-                  prefix: const Text('₹ '),
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Padding(
+                padding:
+                    const EdgeInsets.only(right: 8.0),
+                child: TextField(
+                  controller: _itemController,
+                  decoration: InputDecoration(
+                    labelText: 'Item Name',
+                    border: OutlineInputBorder(
+                      borderRadius:
+                          BorderRadius.circular(10),
+                    ),
+                  ),
                 ),
               ),
             ),
-            const SizedBox(width: 10),
             Expanded(
-              child: TextField(
-                controller: _membersController,
-                keyboardType: TextInputType.number,
-                decoration: InputDecoration(
-                  labelText: "Members",
-                  hintText: "e.g., 2",
-                  border: OutlineInputBorder(borderRadius: BorderRadius.circular(10)),
-                  contentPadding: const EdgeInsets.symmetric(horizontal: 12),
+              child: Padding(
+                padding:
+                    const EdgeInsets.only(left: 8.0),
+                child: TextField(
+                  controller: _amountController,
+                  keyboardType: TextInputType.number,
+                  decoration: InputDecoration(
+                    labelText: 'Amount (₹)',
+                    border: OutlineInputBorder(
+                      borderRadius:
+                          BorderRadius.circular(10),
+                    ),
+                  ),
                 ),
-                onChanged: (_) {
-                  // Rebuild total section immediately on member change
-                  setState(() {});
-                },
               ),
             ),
           ],
         ),
-        const SizedBox(height: 16),
+        const SizedBox(height: 15),
+        Row(
+          crossAxisAlignment:
+              CrossAxisAlignment.center,
+          children: [
+            Expanded(
+              child: Text(
+                'Split for how many members (Max: $_totalTravelers):',
+                style: TextStyle(
+                  fontSize: 16,
+                  color: Colors.grey.shade700,
+                ),
+              ),
+            ),
+            SizedBox(
+              width: 80,
+              child: TextField(
+                controller: _splitMembersController,
+                keyboardType: TextInputType.number,
+                textAlign: TextAlign.center,
+                decoration: InputDecoration(
+                  hintText: '1-$_totalTravelers',
+                  border: const OutlineInputBorder(
+                    borderRadius: BorderRadius.all(
+                      Radius.circular(10),
+                    ),
+                  ),
+                  contentPadding:
+                      const EdgeInsets.symmetric(
+                          horizontal: 5, vertical: 10),
+                ),
+                enabled: _totalTravelers > 1,
+              ),
+            ),
+          ],
+        ),
+        const SizedBox(height: 15),
         Row(
           children: [
             Expanded(
               child: ElevatedButton(
-                onPressed: _addExpense,
+                onPressed: _resetExpenses,
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _primaryButtonColor,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 15),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  padding:
+                      const EdgeInsets.symmetric(
+                          vertical: 15),
+                  shape: RoundedRectangleBorder(
+                    borderRadius:
+                        BorderRadius.circular(12),
+                  ),
                 ),
                 child: const Text(
-                  "Add Expense",
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                  "Reset",
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ),
-            const SizedBox(width: 10),
+            const SizedBox(width: 15),
             Expanded(
               child: ElevatedButton(
-                onPressed: _resetExpenses,
+                onPressed: _addExpense,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor: _clearButtonColor,
+                  backgroundColor:
+                      Colors.green.shade600,
                   foregroundColor: Colors.white,
-                  padding: const EdgeInsets.symmetric(vertical: 15),
-                  shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+                  padding:
+                      const EdgeInsets.symmetric(
+                          vertical: 15),
+                  shape: RoundedRectangleBorder(
+                    borderRadius:
+                        BorderRadius.circular(12),
+                  ),
                 ),
                 child: const Text(
-                  "Clear List",
-                  style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                  "Add",
+                  style: TextStyle(
+                    fontSize: 18,
+                    fontWeight: FontWeight.w600,
+                  ),
                 ),
               ),
             ),
@@ -232,95 +590,248 @@ class _ExpenseTabState extends State<ExpenseTab> {
   }
 
   Widget _buildExpenseList() {
-    return Container(
-      constraints: const BoxConstraints(minHeight: 100), 
-      child: Column(
-        crossAxisAlignment: CrossAxisAlignment.start,
-        children: [
-          const Padding(
-            padding: EdgeInsets.only(top: 8.0, bottom: 4.0),
-            child: Text(
-              "Current Expenses:",
-              style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold),
-            ),
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        const Text(
+          "Items Added:",
+          style: TextStyle(
+            fontSize: 18,
+            fontWeight: FontWeight.bold,
           ),
+        ),
+        const SizedBox(height: 10),
+        if (_expenses.isEmpty)
+          const Padding(
+            padding:
+                EdgeInsets.symmetric(vertical: 10.0),
+            child: Center(
+              child: Text(
+                "No expenses added yet.",
+                style: TextStyle(color: Colors.grey),
+              ),
+            ),
+          )
+        else
           ..._expenses.asMap().entries.map((entry) {
             final index = entry.key;
             final expense = entry.value;
-            return ListTile(
-              contentPadding: const EdgeInsets.symmetric(horizontal: 0),
-              title: Text(expense.item, style: const TextStyle(fontSize: 16)),
-              trailing: Row(
-                mainAxisSize: MainAxisSize.min,
-                children: [
-                  Text(
-                    "₹ ${expense.amount.toStringAsFixed(2)}",
-                    style: TextStyle(fontSize: 16, color: _indigoColor, fontWeight: FontWeight.w600),
+            final splitCost =
+                expense.amount / expense.splitMembers;
+
+            return Card(
+              elevation: 1,
+              margin:
+                  const EdgeInsets.symmetric(vertical: 4),
+              child: ListTile(
+                title: Text(
+                  expense.item,
+                  style: const TextStyle(
+                    fontWeight: FontWeight.w600,
                   ),
-                  IconButton(
-                    icon: const Icon(Icons.close, color: Colors.red, size: 20),
-                    onPressed: () => _removeExpense(index),
+                ),
+                subtitle: Text(
+                  'Split for ${expense.splitMembers} member${expense.splitMembers > 1 ? 's' : ''}',
+                  style: TextStyle(
+                    color: Colors.grey.shade600,
                   ),
-                ],
+                ),
+                trailing: Row(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Column(
+                      crossAxisAlignment:
+                          CrossAxisAlignment.end,
+                      mainAxisAlignment:
+                          MainAxisAlignment.center,
+                      children: [
+                        Text(
+                          '₹${expense.amount.toStringAsFixed(2)}',
+                          style: TextStyle(
+                            color: _indigoColor,
+                            fontWeight: FontWeight.bold,
+                          ),
+                        ),
+                        Text(
+                          '(₹${splitCost.toStringAsFixed(2)}/share)',
+                          style: const TextStyle(
+                            fontSize: 12,
+                            color: Colors.green,
+                          ),
+                        ),
+                      ],
+                    ),
+                    IconButton(
+                      icon: const Icon(
+                        Icons.delete,
+                        color: Colors.red,
+                      ),
+                      onPressed: () =>
+                          _removeExpense(index),
+                    ),
+                  ],
+                ),
               ),
             );
           }).toList(),
-          if (_expenses.isEmpty) 
-            const Padding(
-              padding: EdgeInsets.symmetric(vertical: 10.0),
-              child: Center(
-                child: Text(
-                  "No expenses added yet.",
-                  style: TextStyle(color: Colors.grey),
-                ),
+      ],
+    );
+  }
+
+  Widget _buildSplitDetailRow(
+      String label,
+      String value,
+      Color labelColor,
+      Color valueColor) {
+    return Padding(
+      padding:
+          const EdgeInsets.symmetric(vertical: 4.0),
+      child: Row(
+        mainAxisAlignment:
+            MainAxisAlignment.spaceBetween,
+        children: [
+          Expanded(
+            child: Text(
+              label,
+              style: TextStyle(
+                fontSize: 15,
+                color: labelColor,
               ),
+              overflow: TextOverflow.ellipsis,
+              maxLines: 1,
             ),
+          ),
+          const SizedBox(width: 8),
+          Text(
+            value,
+            style: TextStyle(
+              fontSize: 15,
+              fontWeight: FontWeight.bold,
+              color: valueColor,
+            ),
+          ),
         ],
       ),
     );
   }
 
   Widget _buildTotalSection() {
+    final splitData = _calculateSplitDetails();
+
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(vertical: 15.0),
-      decoration: BoxDecoration(
-        color: Colors.indigo.shade50,
-        borderRadius: BorderRadius.circular(10),
-      ),
+      padding: const EdgeInsets.all(15.0),
       child: Column(
+        crossAxisAlignment:
+            CrossAxisAlignment.start,
         children: [
-          Text(
-            "Total: ₹ ${_totalAmount.toStringAsFixed(2)}",
-            style: const TextStyle(fontSize: 20, fontWeight: FontWeight.bold, color: Colors.black87),
+          Row(
+            mainAxisAlignment:
+                MainAxisAlignment.spaceBetween,
+            children: [
+              Text(
+                "Total Expenses:",
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: _indigoColor,
+                ),
+              ),
+              Text(
+                "₹${_totalAmount.toStringAsFixed(2)}",
+                style: TextStyle(
+                  fontSize: 20,
+                  fontWeight: FontWeight.bold,
+                  color: _indigoColor,
+                ),
+              ),
+            ],
           ),
-          const SizedBox(height: 5),
-          Text(
-            "Per Person: ₹ ${_perPersonAmount.toStringAsFixed(2)}",
-            style: TextStyle(fontSize: 18, fontWeight: FontWeight.bold, color: _indigoColor),
+          const Divider(
+            height: 20,
+            color: Colors.grey,
           ),
-          const SizedBox(height: 15),
-          Padding(
-            padding: const EdgeInsets.symmetric(horizontal: 10.0),
-            child: Row(
-              children: [
-                Expanded(
-                  child: ElevatedButton(
-                    onPressed: _saveExpenses, // Calls the corrected saving function
-                    style: ElevatedButton.styleFrom(
-                      backgroundColor: Colors.green.shade600, // Distinct color for Save
-                      foregroundColor: Colors.white,
-                      padding: const EdgeInsets.symmetric(vertical: 15),
-                      shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+          const Text(
+            "Final Split Breakdown:",
+            style: TextStyle(
+              fontSize: 18,
+              fontWeight: FontWeight.bold,
+            ),
+          ),
+          const SizedBox(height: 8),
+          if (_expenses.isNotEmpty) ...[
+            _buildSplitDetailRow(
+              'Total Travelers',
+              '${splitData['Total Travelers']!.toInt()}',
+              Colors.black54,
+              Colors.black54,
+            ),
+            _buildSplitDetailRow(
+              'Sum of Individual Shares',
+              '₹${splitData['Total Split Shares Sum (Items)']!.toStringAsFixed(2)}',
+              Colors.deepOrange,
+              Colors.deepOrange,
+            ),
+            _buildSplitDetailRow(
+              'Average Share Per Traveler (Equal)',
+              '₹${splitData['Split Share per Traveler (Equal)']!.toStringAsFixed(2)}',
+              Colors.green.shade700,
+              Colors.green.shade700,
+            ),
+            const SizedBox(height: 15),
+          ],
+          Row(
+            children: [
+              Expanded(
+                child: OutlinedButton(
+                  onPressed: _resetExpenses,
+                  style: OutlinedButton.styleFrom(
+                    foregroundColor: _clearButtonColor,
+                    side: BorderSide(
+                      color: _clearButtonColor,
                     ),
-                    child: const Text(
-                      "Save",
-                      style: TextStyle(fontSize: 18, fontWeight: FontWeight.w600),
+                    padding:
+                        const EdgeInsets.symmetric(
+                            vertical: 15),
+                    shape: RoundedRectangleBorder(
+                      borderRadius:
+                          BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    "Clear All",
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
                     ),
                   ),
                 ),
-              ],
-            ),
+              ),
+              const SizedBox(width: 15),
+              Expanded(
+                child: ElevatedButton(
+                  onPressed: _saveExpenses,
+                  style: ElevatedButton.styleFrom(
+                    backgroundColor:
+                        Colors.green.shade600,
+                    foregroundColor: Colors.white,
+                    padding:
+                        const EdgeInsets.symmetric(
+                            vertical: 15),
+                    shape: RoundedRectangleBorder(
+                      borderRadius:
+                          BorderRadius.circular(12),
+                    ),
+                  ),
+                  child: const Text(
+                    "Save",
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.w600,
+                    ),
+                  ),
+                ),
+              ),
+            ],
           ),
         ],
       ),
@@ -334,17 +845,32 @@ class _ExpenseTabState extends State<ExpenseTab> {
         color: const Color(0xFFEAF3FF),
         padding: const EdgeInsets.all(20.0),
         child: Card(
-          shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(20)),
+          shape: RoundedRectangleBorder(
+            borderRadius:
+                BorderRadius.circular(20),
+          ),
           elevation: 8,
           child: Padding(
-            padding: const EdgeInsets.symmetric(vertical: 24.0, horizontal: 26.0),
+            padding: const EdgeInsets.symmetric(
+              vertical: 24.0,
+              horizontal: 26.0,
+            ),
             child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
+              crossAxisAlignment:
+                  CrossAxisAlignment.start,
               children: [
+                _buildTripSelection(),
+                const Divider(
+                  color: Colors.grey,
+                  height: 30,
+                ),
                 _buildInputSection(),
                 const SizedBox(height: 15),
                 _buildExpenseList(),
-                const Divider(color: Colors.grey, height: 30),
+                const Divider(
+                  color: Colors.grey,
+                  height: 30,
+                ),
                 _buildTotalSection(),
               ],
             ),
