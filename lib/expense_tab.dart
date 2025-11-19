@@ -1,7 +1,7 @@
 // expense_tab.dart
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ExpenseTab extends StatefulWidget {
   const ExpenseTab({Key? key}) : super(key: key);
@@ -42,7 +42,7 @@ class _ExpenseTabState extends State<ExpenseTab> {
 
   /// Each plan map will have:
   /// {
-  ///   "id": "...",                   // unique id
+  ///   "id": "...",                   // firestore doc id
   ///   "tripRoute": "From → To",
   ///   "tripStartDate": "YYYY-MM-DD" or "No Date",
   ///   "travelers": "2",
@@ -56,8 +56,7 @@ class _ExpenseTabState extends State<ExpenseTab> {
   void initState() {
     super.initState();
     _loadPlans();
-    _totalTravelers =
-        int.tryParse(_totalTravelersInputController.text) ?? 1;
+    _totalTravelers = int.tryParse(_totalTravelersInputController.text) ?? 1;
 
     _tripDropdownFocusNode.addListener(() {
       if (_tripDropdownFocusNode.hasFocus) {
@@ -77,72 +76,88 @@ class _ExpenseTabState extends State<ExpenseTab> {
   }
 
   // --------------------------------------------------------------------------
-  // Load plans from SharedPreferences (MATCHES main.dart format)
+  // Load plans from Firestore (MATCHES main.dart Firestore format)
   // --------------------------------------------------------------------------
   Future<void> _loadPlans() async {
-    final prefs = await SharedPreferences.getInstance();
-    final List<String> savedPlansJson =
-        prefs.getStringList('savedTripPlans') ?? [];
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      if (!mounted) return;
+      setState(() {
+        _savedPlans = [];
+        _selectedTrip = null;
+        _totalTravelers =
+            int.tryParse(_totalTravelersInputController.text) ?? 1;
+        _splitMembersController.text = _totalTravelers.toString();
+      });
+      return;
+    }
 
-    final List<Map<String, dynamic>> loadedPlans = [];
+    try {
+      final snapshot = await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('plans')
+          .orderBy('createdAt', descending: true)
+          .get();
 
-    // Latest first
-    for (final jsonString in savedPlansJson.reversed) {
-      try {
-        final Map<String, dynamic> raw =
-            jsonDecode(jsonString) as Map<String, dynamic>;
+      final List<Map<String, dynamic>> loadedPlans = [];
+
+      for (final doc in snapshot.docs) {
+        final raw = doc.data();
         final Map<String, dynamic> meta =
             (raw['meta'] ?? {}) as Map<String, dynamic>;
 
         final String from = (meta['from'] ?? '') as String;
         final String to = (meta['to'] ?? '') as String;
         final String tripName =
-            (meta['tripName'] ?? (from.isNotEmpty && to.isNotEmpty
-                    ? '$from → $to'
-                    : 'Trip')) as String;
+            (meta['tripName'] ??
+                    (from.isNotEmpty && to.isNotEmpty
+                        ? '$from → $to'
+                        : 'Trip')) as String;
+
         final dynamic membersRaw = meta['members'] ?? 1;
         final int members = membersRaw is int
             ? membersRaw
             : int.tryParse(membersRaw.toString()) ?? 1;
 
-        final String? plannedIso =
-            meta['plannedDate'] as String?;
-        final String tripDateDisplay = (plannedIso != null &&
-                plannedIso.isNotEmpty)
-            ? plannedIso.split('T').first
-            : 'No Date';
+        final String? plannedIso = meta['plannedDate'] as String?;
+        final String tripDateDisplay =
+            (plannedIso != null && plannedIso.isNotEmpty)
+                ? plannedIso.split('T').first
+                : 'No Date';
 
         final String estimatedCost =
             (raw['estimatedTotalCost'] ?? '') as String;
 
         loadedPlans.add({
-          'id': '$tripName|$tripDateDisplay|$members',
+          'id': doc.id,
           'tripRoute': tripName,
           'tripStartDate': tripDateDisplay,
           'travelers': members.toString(),
           'estimatedTotalCost': estimatedCost,
         });
-      } catch (e) {
-        print('Error decoding plan JSON in ExpenseTab: $e');
       }
+
+      if (!mounted) return;
+
+      setState(() {
+        _savedPlans = loadedPlans;
+
+        // keep selectedTrip if still present
+        if (_selectedTrip != null &&
+            !_savedPlans.any((p) => p['id'] == _selectedTrip!['id'])) {
+          _selectedTrip = null;
+          _totalTravelers =
+              int.tryParse(_totalTravelersInputController.text) ?? 1;
+          _splitMembersController.text = _totalTravelers.toString();
+        }
+      });
+    } catch (e) {
+      if (!mounted) return;
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text('Error loading trips: $e')),
+      );
     }
-
-    if (!mounted) return;
-
-    setState(() {
-      _savedPlans = loadedPlans;
-
-      // keep selectedTrip if still present
-      if (_selectedTrip != null &&
-          !_savedPlans.any(
-              (p) => p['id'] == _selectedTrip!['id'])) {
-        _selectedTrip = null;
-        _totalTravelers =
-            int.tryParse(_totalTravelersInputController.text) ?? 1;
-        _splitMembersController.text =
-            _totalTravelers.toString();
-      }
-    });
   }
 
   // --------------------------------------------------------------------------
@@ -155,13 +170,10 @@ class _ExpenseTabState extends State<ExpenseTab> {
     double totalAmount = _totalAmount;
 
     double totalSplitShareSum = _expenses.fold(
-        0.0,
-        (sum, item) =>
-            sum + (item.amount / item.splitMembers));
+        0.0, (sum, item) => sum + (item.amount / item.splitMembers));
 
-    double perPersonShare = _totalTravelers > 0
-        ? totalAmount / _totalTravelers
-        : 0.0;
+    double perPersonShare =
+        _totalTravelers > 0 ? totalAmount / _totalTravelers : 0.0;
 
     return {
       'Total Expense': totalAmount,
@@ -179,13 +191,10 @@ class _ExpenseTabState extends State<ExpenseTab> {
     final amountText = _amountController.text;
     final splitMembersText = _splitMembersController.text;
 
-    if (item.isEmpty ||
-        amountText.isEmpty ||
-        splitMembersText.isEmpty) {
+    if (item.isEmpty || amountText.isEmpty || splitMembersText.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-              "Please enter item, amount, and split members"),
+          content: Text("Please enter item, amount, and split members"),
         ),
       );
       return;
@@ -238,15 +247,25 @@ class _ExpenseTabState extends State<ExpenseTab> {
       _totalTravelersInputController.text = '1';
     });
     ScaffoldMessenger.of(context).showSnackBar(
-      const SnackBar(
-          content: Text("Current expense list cleared.")),
+      const SnackBar(content: Text("Current expense list cleared.")),
     );
   }
 
-  void _saveExpenses() async {
+  // Save expenses to Firestore under users/{uid}/expenses
+  Future<void> _saveExpenses() async {
     if (_expenses.isEmpty) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text("No expenses to save.")),
+      );
+      return;
+    }
+
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You must be logged in to save expenses.'),
+        ),
       );
       return;
     }
@@ -260,24 +279,22 @@ class _ExpenseTabState extends State<ExpenseTab> {
           ? {
               'name': _selectedTrip!['tripRoute'],
               'date': _selectedTrip!['tripStartDate'],
-              'estimatedCost':
-                  _selectedTrip!['estimatedTotalCost'],
+              'estimatedCost': _selectedTrip!['estimatedTotalCost'],
               'travelers': _totalTravelers,
             }
           : 'Manual Entry',
       'travelers': _totalTravelers,
       'split_data': _calculateSplitDetails(),
-      'items': _expenses.map((e) => e.toJson()).toList()
+      'items': _expenses.map((e) => e.toJson()).toList(),
+      'createdAt': FieldValue.serverTimestamp(),
     };
 
     try {
-      final prefs = await SharedPreferences.getInstance();
-
-      final List<String> savedRecordsJson =
-          prefs.getStringList('savedExpenseRecords') ?? [];
-      savedRecordsJson.add(jsonEncode(recordMetadata));
-      await prefs.setStringList(
-          'savedExpenseRecords', savedRecordsJson);
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('expenses')
+          .add(recordMetadata);
 
       setState(() {
         _expenses.clear();
@@ -289,7 +306,8 @@ class _ExpenseTabState extends State<ExpenseTab> {
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-            content: Text("Expense record saved successfully!")),
+          content: Text("Expense record saved to your account!"),
+        ),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -315,8 +333,8 @@ class _ExpenseTabState extends State<ExpenseTab> {
             border: OutlineInputBorder(
               borderRadius: BorderRadius.circular(10),
             ),
-            contentPadding: const EdgeInsets.symmetric(
-                horizontal: 12, vertical: 8),
+            contentPadding:
+                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
           ),
           value: _selectedTrip?['id'],
           hint: const Text('Choose a saved trip plan'),
@@ -327,8 +345,7 @@ class _ExpenseTabState extends State<ExpenseTab> {
               child: Text('Manual Entry'),
             ),
             ..._savedPlans.map((plan) {
-              final String route =
-                  plan['tripRoute'] ?? 'Untitled Trip';
+              final String route = plan['tripRoute'] ?? 'Untitled Trip';
               final String display =
                   '$route (${plan['tripStartDate'] ?? 'No Date'})';
               return DropdownMenuItem<String>(
@@ -342,27 +359,19 @@ class _ExpenseTabState extends State<ExpenseTab> {
               if (selectedId == 'MANUAL' || selectedId == null) {
                 _selectedTrip = null;
                 final manualCount =
-                    int.tryParse(_totalTravelersInputController
-                            .text) ??
-                        1;
-                _totalTravelers =
-                    manualCount > 0 ? manualCount : 1;
-                _splitMembersController.text =
-                    _totalTravelers.toString();
+                    int.tryParse(_totalTravelersInputController.text) ?? 1;
+                _totalTravelers = manualCount > 0 ? manualCount : 1;
+                _splitMembersController.text = _totalTravelers.toString();
                 return;
               }
 
-              _selectedTrip = _savedPlans.firstWhere(
-                  (plan) => plan['id'] == selectedId);
+              _selectedTrip =
+                  _savedPlans.firstWhere((plan) => plan['id'] == selectedId);
 
-              final String membersText =
-                  _selectedTrip!['travelers'] ?? '1';
-              final int members =
-                  int.tryParse(membersText) ?? 1;
-              _totalTravelers =
-                  members > 0 ? members : 1;
-              _splitMembersController.text =
-                  _totalTravelers.toString();
+              final String membersText = _selectedTrip!['travelers'] ?? '1';
+              final int members = int.tryParse(membersText) ?? 1;
+              _totalTravelers = members > 0 ? members : 1;
+              _splitMembersController.text = _totalTravelers.toString();
               _totalTravelersInputController.text =
                   _totalTravelers.toString();
             });
@@ -381,8 +390,7 @@ class _ExpenseTabState extends State<ExpenseTab> {
                         fontSize: 16,
                       ),
                     ),
-                    Text(
-                        'Date: ${_selectedTrip!['tripStartDate']}'),
+                    Text('Date: ${_selectedTrip!['tripStartDate']}'),
                     Text(
                       'Total Travelers: $_totalTravelers',
                       style: TextStyle(color: _indigoColor),
@@ -397,8 +405,7 @@ class _ExpenseTabState extends State<ExpenseTab> {
                   ],
                 )
               : Row(
-                  mainAxisAlignment:
-                      MainAxisAlignment.spaceBetween,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     const Text(
                       'Total Travelers:',
@@ -410,8 +417,7 @@ class _ExpenseTabState extends State<ExpenseTab> {
                     SizedBox(
                       width: 80,
                       child: TextField(
-                        controller:
-                            _totalTravelersInputController,
+                        controller: _totalTravelersInputController,
                         keyboardType: TextInputType.number,
                         textAlign: TextAlign.center,
                         decoration: const InputDecoration(
@@ -422,24 +428,18 @@ class _ExpenseTabState extends State<ExpenseTab> {
                             ),
                           ),
                           contentPadding:
-                              EdgeInsets.symmetric(
-                                  horizontal: 5,
-                                  vertical: 10),
+                              EdgeInsets.symmetric(horizontal: 5, vertical: 10),
                         ),
                         onChanged: (value) {
-                          final newCount =
-                              int.tryParse(value) ?? 1;
+                          final newCount = int.tryParse(value) ?? 1;
                           setState(() {
-                            _totalTravelers =
-                                newCount > 0 ? newCount : 1;
+                            _totalTravelers = newCount > 0 ? newCount : 1;
                             if ((int.tryParse(
-                                        _splitMembersController
-                                            .text) ??
+                                        _splitMembersController.text) ??
                                     1) >
                                 _totalTravelers) {
                               _splitMembersController.text =
-                                  _totalTravelers
-                                      .toString();
+                                  _totalTravelers.toString();
                             }
                           });
                         },
@@ -458,20 +458,17 @@ class _ExpenseTabState extends State<ExpenseTab> {
       crossAxisAlignment: CrossAxisAlignment.start,
       children: [
         Row(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Expanded(
               child: Padding(
-                padding:
-                    const EdgeInsets.only(right: 8.0),
+                padding: const EdgeInsets.only(right: 8.0),
                 child: TextField(
                   controller: _itemController,
                   decoration: InputDecoration(
                     labelText: 'Item Name',
                     border: OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(10),
                     ),
                   ),
                 ),
@@ -479,16 +476,14 @@ class _ExpenseTabState extends State<ExpenseTab> {
             ),
             Expanded(
               child: Padding(
-                padding:
-                    const EdgeInsets.only(left: 8.0),
+                padding: const EdgeInsets.only(left: 8.0),
                 child: TextField(
                   controller: _amountController,
                   keyboardType: TextInputType.number,
                   decoration: InputDecoration(
                     labelText: 'Amount (₹)',
                     border: OutlineInputBorder(
-                      borderRadius:
-                          BorderRadius.circular(10),
+                      borderRadius: BorderRadius.circular(10),
                     ),
                   ),
                 ),
@@ -498,8 +493,7 @@ class _ExpenseTabState extends State<ExpenseTab> {
         ),
         const SizedBox(height: 15),
         Row(
-          crossAxisAlignment:
-              CrossAxisAlignment.center,
+          crossAxisAlignment: CrossAxisAlignment.center,
           children: [
             Expanded(
               child: Text(
@@ -524,8 +518,7 @@ class _ExpenseTabState extends State<ExpenseTab> {
                     ),
                   ),
                   contentPadding:
-                      const EdgeInsets.symmetric(
-                          horizontal: 5, vertical: 10),
+                      const EdgeInsets.symmetric(horizontal: 5, vertical: 10),
                 ),
                 enabled: _totalTravelers > 1,
               ),
@@ -541,12 +534,9 @@ class _ExpenseTabState extends State<ExpenseTab> {
                 style: ElevatedButton.styleFrom(
                   backgroundColor: _primaryButtonColor,
                   foregroundColor: Colors.white,
-                  padding:
-                      const EdgeInsets.symmetric(
-                          vertical: 15),
+                  padding: const EdgeInsets.symmetric(vertical: 15),
                   shape: RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                 ),
                 child: const Text(
@@ -563,15 +553,11 @@ class _ExpenseTabState extends State<ExpenseTab> {
               child: ElevatedButton(
                 onPressed: _addExpense,
                 style: ElevatedButton.styleFrom(
-                  backgroundColor:
-                      Colors.green.shade600,
+                  backgroundColor: Colors.green.shade600,
                   foregroundColor: Colors.white,
-                  padding:
-                      const EdgeInsets.symmetric(
-                          vertical: 15),
+                  padding: const EdgeInsets.symmetric(vertical: 15),
                   shape: RoundedRectangleBorder(
-                    borderRadius:
-                        BorderRadius.circular(12),
+                    borderRadius: BorderRadius.circular(12),
                   ),
                 ),
                 child: const Text(
@@ -603,8 +589,7 @@ class _ExpenseTabState extends State<ExpenseTab> {
         const SizedBox(height: 10),
         if (_expenses.isEmpty)
           const Padding(
-            padding:
-                EdgeInsets.symmetric(vertical: 10.0),
+            padding: EdgeInsets.symmetric(vertical: 10.0),
             child: Center(
               child: Text(
                 "No expenses added yet.",
@@ -616,13 +601,11 @@ class _ExpenseTabState extends State<ExpenseTab> {
           ..._expenses.asMap().entries.map((entry) {
             final index = entry.key;
             final expense = entry.value;
-            final splitCost =
-                expense.amount / expense.splitMembers;
+            final splitCost = expense.amount / expense.splitMembers;
 
             return Card(
               elevation: 1,
-              margin:
-                  const EdgeInsets.symmetric(vertical: 4),
+              margin: const EdgeInsets.symmetric(vertical: 4),
               child: ListTile(
                 title: Text(
                   expense.item,
@@ -640,10 +623,8 @@ class _ExpenseTabState extends State<ExpenseTab> {
                   mainAxisSize: MainAxisSize.min,
                   children: [
                     Column(
-                      crossAxisAlignment:
-                          CrossAxisAlignment.end,
-                      mainAxisAlignment:
-                          MainAxisAlignment.center,
+                      crossAxisAlignment: CrossAxisAlignment.end,
+                      mainAxisAlignment: MainAxisAlignment.center,
                       children: [
                         Text(
                           '₹${expense.amount.toStringAsFixed(2)}',
@@ -666,8 +647,7 @@ class _ExpenseTabState extends State<ExpenseTab> {
                         Icons.delete,
                         color: Colors.red,
                       ),
-                      onPressed: () =>
-                          _removeExpense(index),
+                      onPressed: () => _removeExpense(index),
                     ),
                   ],
                 ),
@@ -679,16 +659,11 @@ class _ExpenseTabState extends State<ExpenseTab> {
   }
 
   Widget _buildSplitDetailRow(
-      String label,
-      String value,
-      Color labelColor,
-      Color valueColor) {
+      String label, String value, Color labelColor, Color valueColor) {
     return Padding(
-      padding:
-          const EdgeInsets.symmetric(vertical: 4.0),
+      padding: const EdgeInsets.symmetric(vertical: 4.0),
       child: Row(
-        mainAxisAlignment:
-            MainAxisAlignment.spaceBetween,
+        mainAxisAlignment: MainAxisAlignment.spaceBetween,
         children: [
           Expanded(
             child: Text(
@@ -721,12 +696,10 @@ class _ExpenseTabState extends State<ExpenseTab> {
     return Container(
       padding: const EdgeInsets.all(15.0),
       child: Column(
-        crossAxisAlignment:
-            CrossAxisAlignment.start,
+        crossAxisAlignment: CrossAxisAlignment.start,
         children: [
           Row(
-            mainAxisAlignment:
-                MainAxisAlignment.spaceBetween,
+            mainAxisAlignment: MainAxisAlignment.spaceBetween,
             children: [
               Text(
                 "Total Expenses:",
@@ -789,12 +762,9 @@ class _ExpenseTabState extends State<ExpenseTab> {
                     side: BorderSide(
                       color: _clearButtonColor,
                     ),
-                    padding:
-                        const EdgeInsets.symmetric(
-                            vertical: 15),
+                    padding: const EdgeInsets.symmetric(vertical: 15),
                     shape: RoundedRectangleBorder(
-                      borderRadius:
-                          BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                   ),
                   child: const Text(
@@ -811,15 +781,11 @@ class _ExpenseTabState extends State<ExpenseTab> {
                 child: ElevatedButton(
                   onPressed: _saveExpenses,
                   style: ElevatedButton.styleFrom(
-                    backgroundColor:
-                        Colors.green.shade600,
+                    backgroundColor: Colors.green.shade600,
                     foregroundColor: Colors.white,
-                    padding:
-                        const EdgeInsets.symmetric(
-                            vertical: 15),
+                    padding: const EdgeInsets.symmetric(vertical: 15),
                     shape: RoundedRectangleBorder(
-                      borderRadius:
-                          BorderRadius.circular(12),
+                      borderRadius: BorderRadius.circular(12),
                     ),
                   ),
                   child: const Text(
@@ -846,8 +812,7 @@ class _ExpenseTabState extends State<ExpenseTab> {
         padding: const EdgeInsets.all(20.0),
         child: Card(
           shape: RoundedRectangleBorder(
-            borderRadius:
-                BorderRadius.circular(20),
+            borderRadius: BorderRadius.circular(20),
           ),
           elevation: 8,
           child: Padding(
@@ -856,8 +821,7 @@ class _ExpenseTabState extends State<ExpenseTab> {
               horizontal: 26.0,
             ),
             child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildTripSelection(),
                 const Divider(

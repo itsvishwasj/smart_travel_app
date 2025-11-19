@@ -1,8 +1,8 @@
 // expenses_history_screen.dart
 import 'package:flutter/material.dart';
-import 'package:shared_preferences/shared_preferences.dart';
-import 'dart:convert';
 import 'package:intl/intl.dart';
+import 'package:firebase_auth/firebase_auth.dart';
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 class ExpensesHistoryScreen extends StatefulWidget {
   const ExpensesHistoryScreen({Key? key}) : super(key: key);
@@ -14,76 +14,34 @@ class ExpensesHistoryScreen extends StatefulWidget {
 
 class _ExpensesHistoryScreenState
     extends State<ExpensesHistoryScreen> {
-  List<Map<String, dynamic>> _savedRecords = [];
-  bool _isLoading = true;
+  // Delete record from Firestore
+  Future<void> _deleteExpenseRecord(String docId) async {
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) return;
 
-  @override
-  void initState() {
-    super.initState();
-    _loadRecords();
-  }
-
-  Future<void> _loadRecords() async {
-    final prefs = await SharedPreferences.getInstance();
-    final List<String> savedRecordsJson =
-        prefs.getStringList('savedExpenseRecords') ?? [];
-
-    final List<Map<String, dynamic>> loadedRecords = [];
-
-    // newest first
-    for (final jsonString in savedRecordsJson.reversed) {
-      try {
-        final dynamic decoded = jsonDecode(jsonString);
-
-        if (decoded is Map) {
-          loadedRecords.add(
-            Map<String, dynamic>.from(decoded),
-          );
-        } else {
-          print(
-              'Skipping expense record: not a Map - $decoded');
-        }
-      } catch (e) {
-        print(
-            'Error decoding expense record JSON: $e');
-      }
-    }
-
-    setState(() {
-      _savedRecords = loadedRecords;
-      _isLoading = false;
-    });
-  }
-
-  // Delete record (and update SharedPreferences)
-  Future<void> _deleteExpenseRecord(int index) async {
-    final prefs = await SharedPreferences.getInstance();
-    final List<String> savedRecordsJson =
-        prefs.getStringList('savedExpenseRecords') ?? [];
-
-    final int originalIndex =
-        savedRecordsJson.length - 1 - index;
-
-    if (originalIndex >= 0 &&
-        originalIndex < savedRecordsJson.length) {
-      savedRecordsJson.removeAt(originalIndex);
-      await prefs.setStringList(
-          'savedExpenseRecords', savedRecordsJson);
-
-      setState(() {
-        _savedRecords.removeAt(index);
-      });
+    try {
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('expenses')
+          .doc(docId)
+          .delete();
 
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(
-          content: Text(
-              "Expense record deleted successfully."),
+          content: Text("Expense record deleted successfully."),
+        ),
+      );
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(
+          content: Text("Failed to delete expense record: $e"),
         ),
       );
     }
   }
 
-  void _confirmDeleteRecord(int index) {
+  void _confirmDeleteRecord(String docId) {
     showDialog(
       context: context,
       builder: (BuildContext context) {
@@ -95,8 +53,7 @@ class _ExpensesHistoryScreenState
           actions: <Widget>[
             TextButton(
               child: const Text("Cancel"),
-              onPressed: () =>
-                  Navigator.of(context).pop(),
+              onPressed: () => Navigator.of(context).pop(),
             ),
             TextButton(
               child: const Text(
@@ -105,7 +62,7 @@ class _ExpensesHistoryScreenState
               ),
               onPressed: () {
                 Navigator.of(context).pop();
-                _deleteExpenseRecord(index);
+                _deleteExpenseRecord(docId);
               },
             ),
           ],
@@ -114,20 +71,32 @@ class _ExpensesHistoryScreenState
     );
   }
 
-  // Build one expense card (matches new structure from expense_tab.dart)
+  // Build one expense card (matches structure from updated expense_tab.dart)
   Widget _buildExpenseCard(
-      Map<String, dynamic> record, int index) {
+    Map<String, dynamic> record,
+    String docId,
+  ) {
     // ===== BASIC FIELDS =====
     final double total =
         (record['total'] as num?)?.toDouble() ?? 0.0;
     final int travelers =
         (record['travelers'] as num?)?.toInt() ?? 1;
 
-    // Timestamp
-    final String timestamp = record['timestamp'] != null
-        ? DateFormat('MMM dd, yyyy - hh:mm a')
-            .format(DateTime.parse(record['timestamp']))
-        : 'Unknown Date';
+    // Timestamp: prefer createdAt (Firestore), else fallback to 'timestamp' string
+    String timestampLabel = 'Unknown Date';
+
+    if (record['createdAt'] is Timestamp) {
+      final ts = record['createdAt'] as Timestamp;
+      timestampLabel =
+          DateFormat('MMM dd, yyyy - hh:mm a').format(ts.toDate());
+    } else if (record['timestamp'] != null) {
+      try {
+        timestampLabel = DateFormat('MMM dd, yyyy - hh:mm a')
+            .format(DateTime.parse(record['timestamp'] as String));
+      } catch (_) {
+        timestampLabel = record['timestamp'].toString();
+      }
+    }
 
     // Split data (safe cast)
     final dynamic splitRaw = record['split_data'];
@@ -142,8 +111,7 @@ class _ExpensesHistoryScreenState
                 ?.toDouble() ??
             0.0;
     final double sumShares =
-        (splitData['Total Split Shares Sum (Items)']
-                    as num?)
+        (splitData['Total Split Shares Sum (Items)'] as num?)
                 ?.toDouble() ??
             0.0;
 
@@ -154,22 +122,19 @@ class _ExpensesHistoryScreenState
     String estimatedCost = '-';
 
     if (tripDetailsRaw is Map) {
-      final map =
-          Map<String, dynamic>.from(tripDetailsRaw);
+      final map = Map<String, dynamic>.from(tripDetailsRaw);
       tripName = (map['name'] ?? 'Trip').toString();
       tripDate = (map['date'] ?? '-').toString();
-      estimatedCost =
-          (map['estimatedCost'] ?? '-').toString();
+      estimatedCost = (map['estimatedCost'] ?? '-').toString();
     }
 
     // Items list (safe)
     final List<dynamic> itemsRaw =
         (record['items'] as List?) ?? const [];
-    final List<Map<String, dynamic>> items =
-        itemsRaw
-            .whereType<Map>()
-            .map((m) => Map<String, dynamic>.from(m))
-            .toList();
+    final List<Map<String, dynamic>> items = itemsRaw
+        .whereType<Map>()
+        .map((m) => Map<String, dynamic>.from(m))
+        .toList();
 
     return Card(
       margin: const EdgeInsets.only(bottom: 16),
@@ -188,11 +153,10 @@ class _ExpensesHistoryScreenState
           ),
         ),
         subtitle: Column(
-          crossAxisAlignment:
-              CrossAxisAlignment.start,
+          crossAxisAlignment: CrossAxisAlignment.start,
           children: [
             Text(
-              "Date Saved: $timestamp",
+              "Date Saved: $timestampLabel",
               style: const TextStyle(
                 fontSize: 13,
                 color: Colors.black54,
@@ -215,17 +179,14 @@ class _ExpensesHistoryScreenState
             Icons.delete_forever,
             color: Colors.red,
           ),
-          onPressed: () =>
-              _confirmDeleteRecord(index),
+          onPressed: () => _confirmDeleteRecord(docId),
           tooltip: 'Delete Record',
         ),
         children: <Widget>[
           Padding(
-            padding:
-                const EdgeInsets.fromLTRB(20, 0, 20, 20),
+            padding: const EdgeInsets.fromLTRB(20, 0, 20, 20),
             child: Column(
-              crossAxisAlignment:
-                  CrossAxisAlignment.start,
+              crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 const Divider(
                   color: Colors.grey,
@@ -235,16 +196,13 @@ class _ExpensesHistoryScreenState
                 // Trip info (only if linked to a trip)
                 if (tripDetailsRaw is! String)
                   Column(
-                    crossAxisAlignment:
-                        CrossAxisAlignment.start,
+                    crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
                       Text(
                         "Trip Route: $tripName",
                         style: TextStyle(
-                          fontWeight:
-                              FontWeight.w600,
-                          color:
-                              Colors.indigo.shade700,
+                          fontWeight: FontWeight.w600,
+                          color: Colors.indigo.shade700,
                         ),
                       ),
                       const SizedBox(height: 2),
@@ -261,8 +219,7 @@ class _ExpensesHistoryScreenState
                         style: TextStyle(
                           fontSize: 13,
                           color: Colors.green.shade700,
-                          fontWeight:
-                              FontWeight.w600,
+                          fontWeight: FontWeight.w600,
                         ),
                       ),
                       const SizedBox(height: 10),
@@ -271,71 +228,58 @@ class _ExpensesHistoryScreenState
 
                 // Travelers & split
                 Row(
-                  mainAxisAlignment:
-                      MainAxisAlignment.spaceBetween,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
                       "Total Travelers:",
                       style: TextStyle(
-                        fontWeight:
-                            FontWeight.w600,
-                        color:
-                            Colors.indigo.shade700,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.indigo.shade700,
                       ),
                     ),
                     Text(
                       "$travelers",
                       style: const TextStyle(
-                        fontWeight:
-                            FontWeight.w600,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 5),
                 Row(
-                  mainAxisAlignment:
-                      MainAxisAlignment.spaceBetween,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
                       "Equal Split (per traveler):",
                       style: TextStyle(
-                        fontWeight:
-                            FontWeight.w600,
-                        color:
-                            Colors.indigo.shade700,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.indigo.shade700,
                       ),
                     ),
                     Text(
                       "₹${equalShare.toStringAsFixed(2)}",
                       style: const TextStyle(
-                        fontWeight:
-                            FontWeight.w600,
+                        fontWeight: FontWeight.w600,
                       ),
                     ),
                   ],
                 ),
                 const SizedBox(height: 5),
                 Row(
-                  mainAxisAlignment:
-                      MainAxisAlignment.spaceBetween,
+                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
                   children: [
                     Text(
                       "Sum of Individual Shares:",
                       style: TextStyle(
-                        fontWeight:
-                            FontWeight.w600,
-                        color:
-                            Colors.deepOrange.shade700,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.deepOrange.shade700,
                       ),
                     ),
                     Text(
                       "₹${sumShares.toStringAsFixed(2)}",
                       style: TextStyle(
-                        fontWeight:
-                            FontWeight.w600,
-                        color:
-                            Colors.deepOrange.shade700,
+                        fontWeight: FontWeight.w600,
+                        color: Colors.deepOrange.shade700,
                       ),
                     ),
                   ],
@@ -366,66 +310,48 @@ class _ExpensesHistoryScreenState
                 else
                   ...items.map((item) {
                     final String name =
-                        (item['item'] ?? '')
-                            .toString();
+                        (item['item'] ?? '').toString();
                     final double amount =
-                        (item['amount'] as num?)
-                                ?.toDouble() ??
-                            0.0;
+                        (item['amount'] as num?)?.toDouble() ?? 0.0;
                     final int splitMembers =
-                        (item['splitMembers']
-                                    as num?)
-                                ?.toInt() ??
-                            1;
+                        (item['splitMembers'] as num?)?.toInt() ?? 1;
                     final double perShare =
-                        amount / (splitMembers == 0
-                            ? 1
-                            : splitMembers);
+                        amount / (splitMembers == 0 ? 1 : splitMembers);
 
                     return Padding(
-                      padding:
-                          const EdgeInsets.symmetric(
+                      padding: const EdgeInsets.symmetric(
                         vertical: 4.0,
                         horizontal: 8.0,
                       ),
                       child: Row(
                         mainAxisAlignment:
-                            MainAxisAlignment
-                                .spaceBetween,
-                        crossAxisAlignment:
-                            CrossAxisAlignment.start,
+                            MainAxisAlignment.spaceBetween,
+                        crossAxisAlignment: CrossAxisAlignment.start,
                         children: [
                           Expanded(
                             child: Text(
                               "• $name\n  (split for $splitMembers member${splitMembers > 1 ? 's' : ''})",
-                              style:
-                                  const TextStyle(
+                              style: const TextStyle(
                                 fontSize: 14,
                               ),
                             ),
                           ),
                           const SizedBox(width: 8),
                           Column(
-                            crossAxisAlignment:
-                                CrossAxisAlignment.end,
+                            crossAxisAlignment: CrossAxisAlignment.end,
                             children: [
                               Text(
                                 "₹${amount.toStringAsFixed(2)}",
-                                style:
-                                    const TextStyle(
+                                style: const TextStyle(
                                   fontSize: 14,
-                                  fontWeight:
-                                      FontWeight
-                                          .w600,
+                                  fontWeight: FontWeight.w600,
                                 ),
                               ),
                               Text(
                                 "₹${perShare.toStringAsFixed(2)}/share",
-                                style:
-                                    const TextStyle(
+                                style: const TextStyle(
                                   fontSize: 12,
-                                  color:
-                                      Colors.green,
+                                  color: Colors.green,
                                 ),
                               ),
                             ],
@@ -444,6 +370,31 @@ class _ExpensesHistoryScreenState
 
   @override
   Widget build(BuildContext context) {
+    final user = FirebaseAuth.instance.currentUser;
+
+    if (user == null) {
+      return Scaffold(
+        appBar: AppBar(
+          title: const Text('Past Expense Records'),
+          backgroundColor: Colors.indigo,
+          foregroundColor: Colors.white,
+        ),
+        backgroundColor: const Color(0xFFEAF3FF),
+        body: const Center(
+          child: Text(
+            'Please log in to view your saved expense records.',
+            textAlign: TextAlign.center,
+          ),
+        ),
+      );
+    }
+
+    final expensesQuery = FirebaseFirestore.instance
+        .collection('users')
+        .doc(user.uid)
+        .collection('expenses')
+        .orderBy('createdAt', descending: true);
+
     return Scaffold(
       appBar: AppBar(
         title: const Text('Past Expense Records'),
@@ -451,65 +402,79 @@ class _ExpensesHistoryScreenState
         foregroundColor: Colors.white,
       ),
       backgroundColor: const Color(0xFFEAF3FF),
-      body: _isLoading
-          ? const Center(
+      body: StreamBuilder<QuerySnapshot<Map<String, dynamic>>>(
+        stream: expensesQuery.snapshots(),
+        builder: (context, snapshot) {
+          if (snapshot.hasError) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Text(
+                  'Error loading expense records:\n${snapshot.error}',
+                  textAlign: TextAlign.center,
+                ),
+              ),
+            );
+          }
+
+          if (snapshot.connectionState == ConnectionState.waiting) {
+            return const Center(
               child: CircularProgressIndicator(
                 color: Colors.indigo,
               ),
-            )
-          : _savedRecords.isEmpty
-              ? Center(
+            );
+          }
+
+          final docs = snapshot.data?.docs ?? [];
+
+          if (docs.isEmpty) {
+            return Center(
+              child: Padding(
+                padding: const EdgeInsets.all(20.0),
+                child: Card(
+                  shape: RoundedRectangleBorder(
+                    borderRadius: BorderRadius.circular(20),
+                  ),
+                  elevation: 8,
                   child: Padding(
-                    padding:
-                        const EdgeInsets.all(20.0),
-                    child: Card(
-                      shape: RoundedRectangleBorder(
-                        borderRadius:
-                            BorderRadius.circular(20),
-                      ),
-                      elevation: 8,
-                      child: Padding(
-                        padding:
-                            const EdgeInsets.all(30.0),
-                        child: Column(
-                          mainAxisSize:
-                              MainAxisSize.min,
-                          mainAxisAlignment:
-                              MainAxisAlignment
-                                  .center,
-                          children: const [
-                            Icon(
-                              Icons.receipt_long,
-                              size: 50,
-                              color: Colors.indigo,
-                            ),
-                            SizedBox(height: 10),
-                            Text(
-                              'No past expense records found. Save a record from the Expenses tab first!',
-                              textAlign:
-                                  TextAlign.center,
-                              style: TextStyle(
-                                fontSize: 18,
-                                color: Colors.grey,
-                              ),
-                            ),
-                          ],
+                    padding: const EdgeInsets.all(30.0),
+                    child: Column(
+                      mainAxisSize: MainAxisSize.min,
+                      mainAxisAlignment: MainAxisAlignment.center,
+                      children: const [
+                        Icon(
+                          Icons.receipt_long,
+                          size: 50,
+                          color: Colors.indigo,
                         ),
-                      ),
+                        SizedBox(height: 10),
+                        Text(
+                          'No past expense records found. Save a record from the Expenses tab first!',
+                          textAlign: TextAlign.center,
+                          style: TextStyle(
+                            fontSize: 18,
+                            color: Colors.grey,
+                          ),
+                        ),
+                      ],
                     ),
                   ),
-                )
-              : ListView.builder(
-                  padding:
-                      const EdgeInsets.all(20.0),
-                  itemCount: _savedRecords.length,
-                  itemBuilder: (context, index) {
-                    final record =
-                        _savedRecords[index];
-                    return _buildExpenseCard(
-                        record, index);
-                  },
                 ),
+              ),
+            );
+          }
+
+          return ListView.builder(
+            padding: const EdgeInsets.all(20.0),
+            itemCount: docs.length,
+            itemBuilder: (context, index) {
+              final doc = docs[index];
+              final record = doc.data();
+              return _buildExpenseCard(record, doc.id);
+            },
+          );
+        },
+      ),
     );
   }
 }

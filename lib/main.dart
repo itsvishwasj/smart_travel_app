@@ -3,7 +3,7 @@ import 'package:flutter/material.dart';
 import 'dart:convert'; // Import for JSON handling
 import 'package:url_launcher/url_launcher.dart';
 import 'package:google_generative_ai/google_generative_ai.dart';
-import 'package:shared_preferences/shared_preferences.dart';
+// import 'package:shared_preferences/shared_preferences.dart';  // ❌ Not needed for plans now
 import 'package:intl/intl.dart'; // For date formatting and current time
 
 // NEW IMPORTS for Firebase Auth and Login Screen
@@ -14,6 +14,9 @@ import 'login_screen.dart'; // Ensure you have created this file
 // NEW IMPORTS for Location Services (as requested)
 import 'package:geolocator/geolocator.dart';
 import 'package:geocoding/geocoding.dart';
+
+// ✅ NEW: Import Firestore for per-user plan storage
+import 'package:cloud_firestore/cloud_firestore.dart';
 
 import 'weather_screen.dart';
 import 'expense_tab.dart';
@@ -57,7 +60,7 @@ class AuthWrapper extends StatelessWidget {
 
   @override
   Widget build(BuildContext context) {
-    return StreamBuilder<User?>(
+    return StreamBuilder<User?>(      // listens for login/logout
       stream: FirebaseAuth.instance.authStateChanges(),
       builder: (context, snapshot) {
         // Loading while checking auth
@@ -321,6 +324,7 @@ class _HomeScreenState extends State<HomeScreen> {
     );
   }
 }
+
 class PlanTab extends StatefulWidget {
   final Function(List<String>) onRouteUpdate; // callback to send routeStops to HomeScreen
   const PlanTab({Key? key, required this.onRouteUpdate}) : super(key: key);
@@ -568,8 +572,8 @@ class _PlanTabState extends State<PlanTab> {
     }
   }
 
-  // Save plan to SharedPreferences
-  void _savePlan() async {
+  // ✅ Save plan to Firestore per logged-in user account
+  Future<void> _savePlan() async {
     if (_generatedPlan == null) {
       ScaffoldMessenger.of(context).showSnackBar(
         const SnackBar(content: Text('No plan generated to save!')),
@@ -577,10 +581,17 @@ class _PlanTabState extends State<PlanTab> {
       return;
     }
 
-    try {
-      final prefs = await SharedPreferences.getInstance();
-      final savedPlansJson = prefs.getStringList('savedTripPlans') ?? [];
+    final user = FirebaseAuth.instance.currentUser;
+    if (user == null) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        const SnackBar(
+          content: Text('You must be logged in to save a plan.'),
+        ),
+      );
+      return;
+    }
 
+    try {
       final from = fromController.text.trim();
       final to = toController.text.trim();
       final membersText = travellersController.text.trim();
@@ -588,27 +599,30 @@ class _PlanTabState extends State<PlanTab> {
           int.tryParse(membersText.isEmpty ? '1' : membersText) ?? 1;
 
       final meta = {
-       'from': from,
-       'to': to,
-       'members': members,
-       'savedAt': DateTime.now().toIso8601String(),
-       'plannedDate': _startDate?.toIso8601String(),   // <-- NEW
-       'tripName': (from.isNotEmpty && to.isNotEmpty)
-          ? '$from → $to'
-          : (from.isNotEmpty ? from : 'Trip ${savedPlansJson.length + 1}'),
+        'from': from,
+        'to': to,
+        'members': members,
+        'savedAt': DateTime.now().toIso8601String(),
+        'plannedDate': _startDate?.toIso8601String(),
+        'tripName': (from.isNotEmpty && to.isNotEmpty)
+            ? '$from → $to'
+            : (from.isNotEmpty ? from : 'Trip'),
       };
 
-
-      final planToStore = {
+      final Map<String, dynamic> planToStore = {
         'meta': meta,
         ..._generatedPlan!, // includes estimatedTotalCost, routeStops, etc.
+        'createdAt': FieldValue.serverTimestamp(),
       };
 
-      savedPlansJson.add(jsonEncode(planToStore));
-      await prefs.setStringList('savedTripPlans', savedPlansJson);
+      await FirebaseFirestore.instance
+          .collection('users')
+          .doc(user.uid)
+          .collection('plans')
+          .add(planToStore);
 
       ScaffoldMessenger.of(context).showSnackBar(
-        const SnackBar(content: Text('Plan saved successfully!')),
+        const SnackBar(content: Text('Plan saved to your account!')),
       );
     } catch (e) {
       ScaffoldMessenger.of(context).showSnackBar(
@@ -638,6 +652,7 @@ class _PlanTabState extends State<PlanTab> {
       const SnackBar(content: Text('Plan reset. Start a new trip!')),
     );
   }
+
   // Generate the travel plan using Gemini
   void _generatePlan() async {
     if (fromController.text.isEmpty || toController.text.isEmpty) {
@@ -856,7 +871,7 @@ class _PlanTabState extends State<PlanTab> {
     });
   }
 
-  // --- NEW: Helper methods for previews + detailed lists for the cards ---
+  // --- Helper methods for previews + detailed lists for the cards ---
 
   String _buildOverviewPreview(
     String tripStartDateText,
@@ -982,6 +997,7 @@ class _PlanTabState extends State<PlanTab> {
       }).toList(),
     );
   }
+
   @override
   Widget build(BuildContext context) {
     final now = DateTime.now();
@@ -1290,7 +1306,7 @@ class _PlanTabState extends State<PlanTab> {
 
               const SizedBox(height: 30),
 
-                 const SizedBox(height: 30),
+              const SizedBox(height: 30),
 
               // ====== CLEAN FOLDABLE SECTIONS (ACCORDION STYLE) ======
               if (_showPlan)
