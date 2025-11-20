@@ -170,12 +170,12 @@ class _HomeScreenState extends State<HomeScreen> {
           actions: [
             IconButton(
               icon: const Icon(Icons.tips_and_updates_outlined),
-              tooltip: 'Trip suggestions',
+              tooltip: 'New Feature Page',
               onPressed: () {
                 Navigator.push(
                   context,
                   MaterialPageRoute(
-                    builder: (_) => const TripSuggestionsScreen(),
+                    builder: (_) => const NewFeatureScreen(),
                   ),
                 );
               },
@@ -1261,23 +1261,36 @@ class _PlanTabState extends State<PlanTab> {
                           borderRadius: BorderRadius.circular(12),
                         ),
                       ),
-                      child: _isLoading
-                          ? const SizedBox(
-                              height: 20,
-                              width: 20,
-                              child: CircularProgressIndicator(
-                                color: Colors.white,
-                                strokeWidth: 3,
-                              ),
-                            )
-                          : const Text(
-                              "Generate Smart Plan (AI)",
-                              style: TextStyle(
-                                fontSize: 16,
-                                fontWeight: FontWeight.w600,
-                                color: Colors.white,
-                              ),
-                            ),
+child: _isLoading
+    ? const SizedBox(
+        height: 20,
+        width: 20,
+        child: CircularProgressIndicator(
+          color: Colors.white,
+          strokeWidth: 3,
+        ),
+      )
+    : Row(
+        mainAxisSize: MainAxisSize.min,
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: const [
+          Icon(
+            Icons.auto_awesome,
+            color: Colors.white,
+            size: 20,
+          ),
+          SizedBox(width: 8),
+          Text(
+            "Generate Smart Plan",
+            style: TextStyle(
+              fontSize: 16,
+              fontWeight: FontWeight.w600,
+              color: Colors.white,
+            ),
+          ),
+        ],
+      ),
+
                     ),
                   ),
                   if (_showPlan || _isLoading) ...[

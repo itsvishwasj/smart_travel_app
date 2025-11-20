@@ -1,4 +1,3 @@
-// expense_tab.dart
 import 'package:flutter/material.dart';
 import 'package:firebase_auth/firebase_auth.dart';
 import 'package:cloud_firestore/cloud_firestore.dart';
@@ -29,10 +28,6 @@ class _ExpenseTabState extends State<ExpenseTab> {
   final TextEditingController _amountController = TextEditingController();
   final TextEditingController _splitMembersController =
       TextEditingController(text: '1');
-  final TextEditingController _totalTravelersInputController =
-      TextEditingController(text: '1');
-
-  final FocusNode _tripDropdownFocusNode = FocusNode();
 
   final Color _primaryButtonColor = const Color(0xFF928FD2);
   final Color _clearButtonColor = const Color(0xFF7672CB);
@@ -55,14 +50,9 @@ class _ExpenseTabState extends State<ExpenseTab> {
   @override
   void initState() {
     super.initState();
+    _totalTravelers = 1;
+    _splitMembersController.text = '1';
     _loadPlans();
-    _totalTravelers = int.tryParse(_totalTravelersInputController.text) ?? 1;
-
-    _tripDropdownFocusNode.addListener(() {
-      if (_tripDropdownFocusNode.hasFocus) {
-        _loadPlans();
-      }
-    });
   }
 
   @override
@@ -70,8 +60,6 @@ class _ExpenseTabState extends State<ExpenseTab> {
     _itemController.dispose();
     _amountController.dispose();
     _splitMembersController.dispose();
-    _totalTravelersInputController.dispose();
-    _tripDropdownFocusNode.dispose();
     super.dispose();
   }
 
@@ -85,9 +73,8 @@ class _ExpenseTabState extends State<ExpenseTab> {
       setState(() {
         _savedPlans = [];
         _selectedTrip = null;
-        _totalTravelers =
-            int.tryParse(_totalTravelersInputController.text) ?? 1;
-        _splitMembersController.text = _totalTravelers.toString();
+        _totalTravelers = 1;
+        _splitMembersController.text = '1';
       });
       return;
     }
@@ -143,13 +130,12 @@ class _ExpenseTabState extends State<ExpenseTab> {
       setState(() {
         _savedPlans = loadedPlans;
 
-        // keep selectedTrip if still present
+        // keep selectedTrip if still present; else reset
         if (_selectedTrip != null &&
             !_savedPlans.any((p) => p['id'] == _selectedTrip!['id'])) {
           _selectedTrip = null;
-          _totalTravelers =
-              int.tryParse(_totalTravelersInputController.text) ?? 1;
-          _splitMembersController.text = _totalTravelers.toString();
+          _totalTravelers = 1;
+          _splitMembersController.text = '1';
         }
       });
     } catch (e) {
@@ -158,6 +144,89 @@ class _ExpenseTabState extends State<ExpenseTab> {
         SnackBar(content: Text('Error loading trips: $e')),
       );
     }
+  }
+
+  // --------------------------------------------------------------------------
+  // Helpers – trip selector dialog + date formatter
+  // --------------------------------------------------------------------------
+  void _openTripSelectorDialog() {
+    showDialog(
+      context: context,
+      barrierDismissible: true,
+      builder: (context) {
+        return Dialog(
+          shape: RoundedRectangleBorder(
+            borderRadius: BorderRadius.circular(20),
+          ),
+          child: Container(
+            padding: const EdgeInsets.all(16),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                const Text(
+                  "Select Trip",
+                  style: TextStyle(fontSize: 20, fontWeight: FontWeight.bold),
+                ),
+                const SizedBox(height: 10),
+                if (_savedPlans.isEmpty)
+                  const Padding(
+                    padding: EdgeInsets.all(20),
+                    child: Text("No plans found."),
+                  )
+                else
+                  ..._savedPlans.map((plan) {
+                    final date = plan["tripStartDate"];
+                    final formattedDate = _formatDate(date.toString());
+
+                    return ListTile(
+                      title: Text(plan['tripRoute']),
+                      subtitle: Text(formattedDate),
+                      onTap: () {
+                        Navigator.pop(context);
+                        setState(() {
+                          _selectedTrip = plan;
+                          _totalTravelers =
+                              int.tryParse(plan['travelers']) ?? 1;
+                          if (_totalTravelers < 1) _totalTravelers = 1;
+                          _splitMembersController.text =
+                              _totalTravelers.toString();
+                        });
+                      },
+                    );
+                  }).toList(),
+              ],
+            ),
+          ),
+        );
+      },
+    );
+  }
+
+  String _formatDate(String dateStr) {
+    try {
+      DateTime date = DateTime.parse(dateStr);
+      return "${date.day} ${_monthName(date.month)} ${date.year}";
+    } catch (e) {
+      return dateStr; // fallback, e.g. "No Date"
+    }
+  }
+
+  String _monthName(int month) {
+    const months = [
+      'Jan',
+      'Feb',
+      'Mar',
+      'Apr',
+      'May',
+      'Jun',
+      'Jul',
+      'Aug',
+      'Sep',
+      'Oct',
+      'Nov',
+      'Dec'
+    ];
+    return months[month - 1];
   }
 
   // --------------------------------------------------------------------------
@@ -244,7 +313,6 @@ class _ExpenseTabState extends State<ExpenseTab> {
       _selectedTrip = null;
       _totalTravelers = 1;
       _splitMembersController.text = '1';
-      _totalTravelersInputController.text = '1';
     });
     ScaffoldMessenger.of(context).showSnackBar(
       const SnackBar(content: Text("Current expense list cleared.")),
@@ -301,7 +369,6 @@ class _ExpenseTabState extends State<ExpenseTab> {
         _selectedTrip = null;
         _totalTravelers = 1;
         _splitMembersController.text = '1';
-        _totalTravelersInputController.text = '1';
       });
 
       ScaffoldMessenger.of(context).showSnackBar(
@@ -321,135 +388,33 @@ class _ExpenseTabState extends State<ExpenseTab> {
   // --------------------------------------------------------------------------
   // UI Widgets
   // --------------------------------------------------------------------------
-
   Widget _buildTripSelection() {
-    return Column(
-      crossAxisAlignment: CrossAxisAlignment.start,
-      children: [
-        DropdownButtonFormField<String>(
-          focusNode: _tripDropdownFocusNode,
-          decoration: InputDecoration(
-            labelText: 'Select Trip',
-            border: OutlineInputBorder(
-              borderRadius: BorderRadius.circular(10),
+    return GestureDetector(
+      onTap: () => _openTripSelectorDialog(),
+      child: Container(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 14),
+        decoration: BoxDecoration(
+          borderRadius: BorderRadius.circular(12),
+          border: Border.all(color: Colors.grey),
+        ),
+        child: Row(
+          mainAxisAlignment: MainAxisAlignment.spaceBetween,
+          children: [
+            Expanded(
+              child: Text(
+                _selectedTrip == null
+                    ? 'Tap to select a trip'
+                    : _selectedTrip!['tripRoute'],
+                style: const TextStyle(fontSize: 16),
+                overflow: TextOverflow.ellipsis,
+                maxLines: 1,
+              ),
             ),
-            contentPadding:
-                const EdgeInsets.symmetric(horizontal: 12, vertical: 8),
-          ),
-          value: _selectedTrip?['id'],
-          hint: const Text('Choose a saved trip plan'),
-          isExpanded: true,
-          items: [
-            const DropdownMenuItem<String>(
-              value: 'MANUAL',
-              child: Text('Manual Entry'),
-            ),
-            ..._savedPlans.map((plan) {
-              final String route = plan['tripRoute'] ?? 'Untitled Trip';
-              final String display =
-                  '$route (${plan['tripStartDate'] ?? 'No Date'})';
-              return DropdownMenuItem<String>(
-                value: plan['id'] as String,
-                child: Text(display),
-              );
-            }).toList(),
+            const SizedBox(width: 8),
+            const Icon(Icons.arrow_drop_down),
           ],
-          onChanged: (String? selectedId) {
-            setState(() {
-              if (selectedId == 'MANUAL' || selectedId == null) {
-                _selectedTrip = null;
-                final manualCount =
-                    int.tryParse(_totalTravelersInputController.text) ?? 1;
-                _totalTravelers = manualCount > 0 ? manualCount : 1;
-                _splitMembersController.text = _totalTravelers.toString();
-                return;
-              }
-
-              _selectedTrip =
-                  _savedPlans.firstWhere((plan) => plan['id'] == selectedId);
-
-              final String membersText = _selectedTrip!['travelers'] ?? '1';
-              final int members = int.tryParse(membersText) ?? 1;
-              _totalTravelers = members > 0 ? members : 1;
-              _splitMembersController.text = _totalTravelers.toString();
-              _totalTravelersInputController.text =
-                  _totalTravelers.toString();
-            });
-          },
         ),
-        Padding(
-          padding: const EdgeInsets.only(top: 12.0),
-          child: _selectedTrip != null
-              ? Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      'Trip: ${_selectedTrip!['tripRoute']}',
-                      style: const TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                    Text('Date: ${_selectedTrip!['tripStartDate']}'),
-                    Text(
-                      'Total Travelers: $_totalTravelers',
-                      style: TextStyle(color: _indigoColor),
-                    ),
-                    Text(
-                      'Estimated Cost: ${_selectedTrip!['estimatedTotalCost'] ?? 'N/A'}',
-                      style: TextStyle(
-                        color: Colors.green.shade700,
-                        fontWeight: FontWeight.bold,
-                      ),
-                    ),
-                  ],
-                )
-              : Row(
-                  mainAxisAlignment: MainAxisAlignment.spaceBetween,
-                  children: [
-                    const Text(
-                      'Total Travelers:',
-                      style: TextStyle(
-                        fontWeight: FontWeight.bold,
-                        fontSize: 16,
-                      ),
-                    ),
-                    SizedBox(
-                      width: 80,
-                      child: TextField(
-                        controller: _totalTravelersInputController,
-                        keyboardType: TextInputType.number,
-                        textAlign: TextAlign.center,
-                        decoration: const InputDecoration(
-                          hintText: 'Count',
-                          border: OutlineInputBorder(
-                            borderRadius: BorderRadius.all(
-                              Radius.circular(10),
-                            ),
-                          ),
-                          contentPadding:
-                              EdgeInsets.symmetric(horizontal: 5, vertical: 10),
-                        ),
-                        onChanged: (value) {
-                          final newCount = int.tryParse(value) ?? 1;
-                          setState(() {
-                            _totalTravelers = newCount > 0 ? newCount : 1;
-                            if ((int.tryParse(
-                                        _splitMembersController.text) ??
-                                    1) >
-                                _totalTravelers) {
-                              _splitMembersController.text =
-                                  _totalTravelers.toString();
-                            }
-                          });
-                        },
-                      ),
-                    ),
-                  ],
-                ),
-        ),
-        const SizedBox(height: 20),
-      ],
+      ),
     );
   }
 
@@ -517,8 +482,8 @@ class _ExpenseTabState extends State<ExpenseTab> {
                       Radius.circular(10),
                     ),
                   ),
-                  contentPadding:
-                      const EdgeInsets.symmetric(horizontal: 5, vertical: 10),
+                  contentPadding: const EdgeInsets.symmetric(
+                      horizontal: 5, vertical: 10),
                 ),
                 enabled: _totalTravelers > 1,
               ),
@@ -824,18 +789,57 @@ class _ExpenseTabState extends State<ExpenseTab> {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 _buildTripSelection(),
-                const Divider(
-                  color: Colors.grey,
-                  height: 30,
-                ),
-                _buildInputSection(),
-                const SizedBox(height: 15),
-                _buildExpenseList(),
-                const Divider(
-                  color: Colors.grey,
-                  height: 30,
-                ),
-                _buildTotalSection(),
+
+                // If no trip selected, keep layout clean but don't show warning text
+                if (_selectedTrip == null) ...[
+                  const SizedBox(height: 10),
+                ] else ...[
+                  const SizedBox(height: 20),
+
+                  // TRIP DETAILS
+                  const Text(
+                    "Trip Details:",
+                    style: TextStyle(
+                      fontSize: 18,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+                  const SizedBox(height: 6),
+                  Text(
+                    "Date: ${_formatDate(_selectedTrip!['tripStartDate'])}",
+                  ),
+                  Text("Total Travelers: $_totalTravelers"),
+                  Text(
+                    "Estimated Cost: ${_selectedTrip!['estimatedTotalCost']}",
+                    style: const TextStyle(
+                      color: Colors.green,
+                      fontWeight: FontWeight.bold,
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+                  const Text(
+                    "Please enter all the expenses of this trip.",
+                    style: TextStyle(
+                      fontSize: 16,
+                      fontWeight: FontWeight.w500,
+                    ),
+                  ),
+
+                  const SizedBox(height: 20),
+                  const Divider(color: Colors.grey, height: 30),
+
+                  // INPUT FORM SECTION
+                  _buildInputSection(),
+                  const SizedBox(height: 15),
+
+                  // EXPENSE LIST
+                  _buildExpenseList(),
+                  const Divider(color: Colors.grey, height: 30),
+
+                  // TOTAL + SAVE SECTION
+                  _buildTotalSection(),
+                ],
               ],
             ),
           ),

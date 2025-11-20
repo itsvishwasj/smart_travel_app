@@ -116,6 +116,7 @@ class _PlansHistoryScreenState extends State<PlansHistoryScreen> {
         .orderBy('createdAt', descending: true);
 
     return Scaffold(
+      backgroundColor: const Color(0xFFEAF3FF),
       appBar: AppBar(
         title: const Text('Past Trip Plans'),
         backgroundColor: Colors.indigo,
